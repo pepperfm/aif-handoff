@@ -241,7 +241,7 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
         </div>
       ) : (
         <div className={`${isCompact ? "space-y-2" : "space-y-3"} pb-6`}>
-          <div className="max-w-md">
+          <div>
             <AddTaskForm projectId={projectId} />
           </div>
           <div className={`flex flex-col gap-2 border border-border bg-card/45 ${isCompact ? "p-1.5" : "p-2"} md:flex-row md:items-center`}>

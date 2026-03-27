@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import {
   HUMAN_ACTIONS_BY_STATUS,
@@ -107,6 +107,22 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<TaskDetailTab>("implementation");
   const taskAttachments = task?.attachments ?? [];
+
+  useEffect(() => {
+    if (!maintenanceSuccess) return;
+    const timeoutId = window.setTimeout(() => {
+      setMaintenanceSuccess(null);
+    }, 4000);
+    return () => window.clearTimeout(timeoutId);
+  }, [maintenanceSuccess]);
+
+  useEffect(() => {
+    if (!maintenanceError) return;
+    const timeoutId = window.setTimeout(() => {
+      setMaintenanceError(null);
+    }, 4000);
+    return () => window.clearTimeout(timeoutId);
+  }, [maintenanceError]);
 
   const visibleActions = task
     ? (ACTION_BUTTONS_BY_STATUS[task.status] ?? []).filter(

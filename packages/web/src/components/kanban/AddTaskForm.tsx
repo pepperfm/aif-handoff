@@ -50,10 +50,10 @@ export function AddTaskForm({ projectId }: Props) {
       <Button
         variant="ghost"
         size="sm"
-        className="w-full justify-start border border-dashed border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+        className="w-full justify-center gap-1 border border-dashed border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
         onClick={() => setIsOpen(true)}
       >
-        <Plus className="h-4 w-4 mr-1" />
+        <Plus className="h-4 w-4" />
         Add task
       </Button>
     );
