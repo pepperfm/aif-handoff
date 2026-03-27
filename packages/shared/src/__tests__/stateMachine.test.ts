@@ -21,6 +21,7 @@ function makeTask(status: Task["status"]): Task {
     blockedFromStatus: null,
     retryAfter: null,
     retryCount: 0,
+    reworkRequested: false,
     lastHeartbeatAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -53,7 +54,9 @@ describe("task state machine", () => {
     const result = applyHumanTaskEvent(makeTask("done"), "request_changes");
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.patch.status).toBe("planning");
+      expect(result.patch.status).toBe("implementing");
+      expect(result.patch.retryCount).toBe(0);
+      expect(result.patch.reworkRequested).toBe(true);
     }
   });
 

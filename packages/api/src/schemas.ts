@@ -42,6 +42,8 @@ export const updateTaskSchema = z.object({
   blockedFromStatus: z.enum(TASK_STATUSES).nullable().optional(),
   retryAfter: z.string().nullable().optional(),
   retryCount: z.number().int().min(0).optional(),
+  reworkRequested: z.boolean().optional(),
+  lastHeartbeatAt: z.string().nullable().optional(),
 });
 
 export const taskEventSchema = z.object({

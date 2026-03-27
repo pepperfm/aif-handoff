@@ -302,9 +302,17 @@ describe("tasks API", () => {
       expect(body.status).toBe("verified");
     });
 
-    it("should send done task back to planning on request_changes", async () => {
+    it("should send done task to implementing with rework flag on request_changes", async () => {
       const db = testDb.current;
-      db.insert(tasks).values({ id: "ev-2", projectId: "test-project", title: "Done task", status: "done" }).run();
+      db.insert(tasks)
+        .values({
+          id: "ev-2",
+          projectId: "test-project",
+          title: "Done task",
+          status: "done",
+          retryCount: 2,
+        })
+        .run();
 
       const res = await app.request("/tasks/ev-2/events", {
         method: "POST",
@@ -314,7 +322,10 @@ describe("tasks API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.status).toBe("planning");
+      expect(body.status).toBe("implementing");
+      expect(body.reworkRequested).toBe(true);
+      expect(body.retryCount).toBe(0);
+      expect(body.lastHeartbeatAt).toBeTruthy();
     });
 
     it("should send plan_ready task back to planning on request_replanning", async () => {

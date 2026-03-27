@@ -49,7 +49,7 @@ The coordinator (`packages/agent/src/coordinator.ts`) polls every 30 seconds via
 ```
 Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implementing ──► Review ──► Done ──► Verified
                             │              │              │              │           │
-                            │              │              │              │           └─[request_changes]──► Planning
+                            │              │              │              │           └─[request_changes]──► Implementing (rework)
                             │              │              │              │
                             │              └─[request_    │              └─────────────────────────────────►
                             │                replanning]──┘
@@ -69,6 +69,7 @@ The pipeline includes two reliability layers for long-running autonomous executi
 
 - **Heartbeat liveness:** Task rows are updated with `lastHeartbeatAt` during agent activity and stage transitions.
 - **Stale-stage watchdog:** On each poll cycle, tasks stuck in `planning` / `implementing` / `review` beyond timeout are auto-recovered to `blocked_external` with retry backoff.
+- **Transition reset:** valid transitions clear watchdog state (`blocked*`, `retryAfter`, `retryCount`) and refresh heartbeat baseline.
 
 For stale `implementing`, recovery resumes from `plan_ready` to force a clean implementation pass instead of continuing a potentially inconsistent in-flight run.
 

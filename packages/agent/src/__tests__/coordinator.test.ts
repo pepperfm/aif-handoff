@@ -184,6 +184,29 @@ describe("coordinator", () => {
     expect(runImplementer).not.toHaveBeenCalled();
   });
 
+  it("should not treat task as stale when updatedAt is fresh but heartbeat is old", async () => {
+    const db = testDb.current;
+    const staleHeartbeat = new Date(Date.now() - 31 * 60_000).toISOString();
+    const freshUpdatedAt = new Date().toISOString();
+    db.insert(tasks)
+      .values({
+        id: "task-fresh-update",
+        projectId: "test-project",
+        title: "Freshly moved to implementing",
+        status: "implementing",
+        lastHeartbeatAt: staleHeartbeat,
+        updatedAt: freshUpdatedAt,
+      })
+      .run();
+
+    await pollAndProcess();
+
+    const task = db.select().from(tasks).where(eq(tasks.id, "task-fresh-update")).get();
+    expect(task!.status).toBe("done");
+    expect(task!.blockedReason).toBeNull();
+    expect(runImplementer).toHaveBeenCalledWith("task-fresh-update", "/tmp/test");
+  });
+
   it("should quarantine stale task when watchdog retry limit reached", async () => {
     const db = testDb.current;
     const staleDate = new Date(Date.now() - 25 * 60_000).toISOString();
@@ -276,6 +299,7 @@ describe("coordinator", () => {
         status: "blocked_external",
         blockedFromStatus: "planning",
         retryAfter: pastRetry,
+        retryCount: 2,
       })
       .run();
 
@@ -288,6 +312,7 @@ describe("coordinator", () => {
     expect(task!.blockedReason).toBeNull();
     expect(task!.blockedFromStatus).toBeNull();
     expect(task!.retryAfter).toBeNull();
+    expect(task!.retryCount).toBe(0);
   });
 
   it("should revert status on implementer failure", async () => {

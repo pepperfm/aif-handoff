@@ -268,6 +268,7 @@ tasksRouter.post("/", zValidator("json", createTaskSchema), async (c) => {
       priority: body.priority,
       autoMode: body.autoMode,
       isFix: body.isFix,
+      reworkRequested: false,
       status: "backlog",
       position: 1000.0,
       lastHeartbeatAt: now,
@@ -513,6 +514,7 @@ tasksRouter.post(
         db.update(tasks)
           .set({
             plan: updatedPlan,
+            reworkRequested: false,
             updatedAt: new Date().toISOString(),
           })
           .where(eq(tasks.id, id))
@@ -541,8 +543,9 @@ tasksRouter.post(
       return c.json({ error: transition.error }, 409);
     }
 
+    const nowIso = new Date().toISOString();
     db.update(tasks)
-      .set({ ...transition.patch, updatedAt: new Date().toISOString() })
+      .set({ ...transition.patch, lastHeartbeatAt: nowIso, updatedAt: nowIso })
       .where(eq(tasks.id, id))
       .run();
 

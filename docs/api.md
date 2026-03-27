@@ -216,6 +216,7 @@ Additional constraints:
 
 - `start_implementation` requires `autoMode=false` (manual gate). For `autoMode=true`, implementation is picked automatically by the coordinator.
 - `fast_fix` requires `autoMode=false` and at least one human comment on the task.
+- `request_changes` transitions `done -> implementing`, sets `reworkRequested=true`, and resets watchdog retry state (`retryCount=0`).
 
 **Response:** `200 OK` — the updated task object.
 

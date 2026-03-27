@@ -1,8 +1,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { getDb, projects, tasks, logger } from "@aif/shared";
+import { getDb, projects, taskComments, tasks, logger } from "@aif/shared";
 import { createActivityLogger, createSubagentLogger, logActivity, getClaudePath } from "../hooks.js";
 import { writeQueryAudit } from "../queryAudit.js";
 import { computePendingPlanLayers, formatLayerSummary } from "../planLayers.js";
@@ -62,6 +62,20 @@ function formatTaskAttachmentsForPrompt(raw: string | null): string {
     .join("\n");
 }
 
+function formatLatestHumanCommentForPrompt(comment: {
+  createdAt: string;
+  message: string;
+  attachments: string | null;
+} | null): string {
+  if (!comment) return "No human comments found for rework request.";
+  return [
+    `[${comment.createdAt}] human`,
+    `message: ${comment.message}`,
+    "attachments:",
+    formatTaskAttachmentsForPrompt(comment.attachments),
+  ].join("\n");
+}
+
 function isBlockedImplementationResult(resultText: string): boolean {
   const normalized = resultText.toLowerCase();
   return (
@@ -118,8 +132,18 @@ ${selectedPlan ?? "No in-task plan copy is available."}`
   const hasParallelLayer = layerComputation.layers.some((layer) => layer.length > 1);
   const layerSummary = formatLayerSummary(layerComputation.layers);
   const pendingTaskCount = layerComputation.tasks.length;
+  const latestHumanComment = task.reworkRequested
+    ? db
+        .select()
+        .from(taskComments)
+        .where(eq(taskComments.taskId, taskId))
+        .orderBy(asc(taskComments.createdAt), asc(taskComments.id))
+        .all()
+        .filter((comment) => comment.author === "human")
+        .at(-1) ?? null
+    : null;
 
-  if (selectedPlan && pendingTaskCount === 0) {
+  if (selectedPlan && pendingTaskCount === 0 && !task.reworkRequested) {
     const nowIso = new Date().toISOString();
     const noOpResult =
       "No pending tasks detected in plan (all tasks already completed). " +
@@ -155,6 +179,12 @@ ${planSection}
 
 Precomputed execution layers (source of truth from orchestrator):
 ${layerSummary}
+
+${task.reworkRequested
+  ? `Rework mode: true (requested from done/request_changes).
+Latest human rework comment (must be addressed in this implementation run):
+${formatLatestHumanCommentForPrompt(latestHumanComment)}`
+  : "Rework mode: false."}
 
 Execution rules:
 - Respect the precomputed layers above as authoritative dependency order.
@@ -265,6 +295,7 @@ Execution rules:
       .set({
         ...(syncedPlan ? { plan: syncedPlan } : {}),
         implementationLog: resultText,
+        reworkRequested: false,
         lastHeartbeatAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })

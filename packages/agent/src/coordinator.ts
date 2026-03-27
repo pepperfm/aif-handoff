@@ -115,6 +115,7 @@ function releaseDueBlockedTasks(db: ReturnType<typeof getDb>): void {
         blockedReason: null,
         blockedFromStatus: null,
         retryAfter: null,
+        retryCount: 0,
         lastHeartbeatAt: nowIso,
         updatedAt: nowIso,
       })
@@ -155,7 +156,9 @@ function recoverStaleInProgressTasks(db: ReturnType<typeof getDb>): void {
   for (const task of candidates) {
     const heartbeatMs = task.lastHeartbeatAt ? parseUpdatedAtMs(task.lastHeartbeatAt) : null;
     const updatedAtMs = parseUpdatedAtMs(task.updatedAt);
-    const referenceMs = heartbeatMs ?? updatedAtMs;
+    const referenceMs = heartbeatMs != null && updatedAtMs != null
+      ? Math.max(heartbeatMs, updatedAtMs)
+      : (heartbeatMs ?? updatedAtMs);
     if (referenceMs == null) continue;
 
     const ageMs = now - referenceMs;
@@ -295,6 +298,7 @@ export async function pollAndProcess(): Promise<void> {
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
           lastHeartbeatAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         })

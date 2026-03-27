@@ -2,7 +2,7 @@ import type { Task, TaskEvent, TaskStatus, UpdateTaskInput } from "./types.js";
 
 type TransitionPatch = Pick<
   UpdateTaskInput,
-  "blockedReason" | "blockedFromStatus" | "retryAfter"
+  "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount" | "reworkRequested"
 > & { status: TaskStatus };
 
 type TransitionResult =
@@ -25,6 +25,8 @@ export function applyHumanTaskEvent(
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
+          reworkRequested: false,
         },
       };
     }
@@ -42,6 +44,8 @@ export function applyHumanTaskEvent(
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
+          reworkRequested: false,
         },
       };
     }
@@ -56,6 +60,8 @@ export function applyHumanTaskEvent(
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
+          reworkRequested: false,
         },
       };
     }
@@ -70,6 +76,8 @@ export function applyHumanTaskEvent(
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
+          reworkRequested: false,
         },
       };
     }
@@ -77,7 +85,7 @@ export function applyHumanTaskEvent(
       if (task.status !== "done") {
         return { ok: false, error: "approve_done is only allowed from done" };
       }
-      return { ok: true, patch: { status: "verified" } };
+      return { ok: true, patch: { status: "verified", retryCount: 0, reworkRequested: false } };
     }
     case "request_changes": {
       if (task.status !== "done") {
@@ -86,10 +94,12 @@ export function applyHumanTaskEvent(
       return {
         ok: true,
         patch: {
-          status: "planning",
+          status: "implementing",
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
+          reworkRequested: true,
         },
       };
     }
@@ -107,6 +117,8 @@ export function applyHumanTaskEvent(
           blockedReason: null,
           blockedFromStatus: null,
           retryAfter: null,
+          retryCount: 0,
+          reworkRequested: false,
         },
       };
     }

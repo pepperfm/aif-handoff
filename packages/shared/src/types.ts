@@ -58,6 +58,7 @@ export interface Task {
   blockedFromStatus: TaskStatus | null;
   retryAfter: string | null;
   retryCount: number;
+  reworkRequested: boolean;
   lastHeartbeatAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -104,6 +105,7 @@ export interface UpdateTaskInput {
   blockedFromStatus?: TaskStatus | null;
   retryAfter?: string | null;
   retryCount?: number;
+  reworkRequested?: boolean;
   lastHeartbeatAt?: string | null;
 }
 

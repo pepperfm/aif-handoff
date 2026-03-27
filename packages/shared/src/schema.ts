@@ -44,6 +44,7 @@ export const tasks = sqliteTable("tasks", {
   blockedFromStatus: text("blocked_from_status").$type<TaskStatus | null>(),
   retryAfter: text("retry_after"),
   retryCount: integer("retry_count").notNull().default(0),
+  reworkRequested: integer("rework_requested", { mode: "boolean" }).notNull().default(false),
   lastHeartbeatAt: text("last_heartbeat_at"),
   createdAt: text("created_at")
     .notNull()

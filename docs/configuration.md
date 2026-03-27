@@ -80,9 +80,11 @@ For development, 30 seconds is a good default. In production, adjust based on yo
 The coordinator includes a stale-stage watchdog:
 
 - Tracks task liveness via `lastHeartbeatAt` (falls back to `updatedAt` for older rows).
+- Effective stale baseline uses the freshest of `lastHeartbeatAt` and `updatedAt`.
 - If a task is stale in `planning`, `implementing`, or `review` for longer than `AGENT_STAGE_STALE_TIMEOUT_MS`, it is auto-moved to `blocked_external` with backoff.
 - If stale recovery count reaches `AGENT_STAGE_STALE_MAX_RETRY`, the task stays in `blocked_external` without `retryAfter` (manual intervention required).
 - For stale `implementing` tasks, recovery resumes from `plan_ready` to avoid half-broken implementation continuation.
+- Any valid human/stage transition resets stale-retry debt (`retryCount=0`) and refreshes heartbeat baseline.
 
 ## Agent Budgets
 
