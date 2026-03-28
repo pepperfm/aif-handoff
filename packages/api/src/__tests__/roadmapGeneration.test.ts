@@ -19,8 +19,13 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: (args: unknown) => mockQuery(args),
 }));
 
-const { generateRoadmapTasks, importGeneratedTasks, buildTaskTags, RoadmapGenerationError } =
-  await import("../services/roadmapGeneration.js");
+const {
+  generateRoadmapFile,
+  generateRoadmapTasks,
+  importGeneratedTasks,
+  buildTaskTags,
+  RoadmapGenerationError,
+} = await import("../services/roadmapGeneration.js");
 const { findTasksByRoadmapAlias } = await import("@aif/data");
 
 function createProjectWithRoadmap(roadmapContent: string) {
@@ -28,6 +33,27 @@ function createProjectWithRoadmap(roadmapContent: string) {
   const aiFactoryDir = join(tmpDir, ".ai-factory");
   mkdirSync(aiFactoryDir, { recursive: true });
   writeFileSync(join(aiFactoryDir, "ROADMAP.md"), roadmapContent);
+
+  const db = testDb.current;
+  const projectId = crypto.randomUUID();
+  db.insert(projects)
+    .values({
+      id: projectId,
+      name: "Test Project",
+      rootPath: tmpDir,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .run();
+
+  return { projectId, tmpDir };
+}
+
+function createProjectWithDescription(descriptionContent: string) {
+  const tmpDir = mkdtempSync(join(tmpdir(), "roadmap-test-"));
+  const aiFactoryDir = join(tmpDir, ".ai-factory");
+  mkdirSync(aiFactoryDir, { recursive: true });
+  writeFileSync(join(aiFactoryDir, "DESCRIPTION.md"), descriptionContent);
 
   const db = testDb.current;
   const projectId = crypto.randomUUID();
@@ -81,6 +107,85 @@ describe("roadmapGeneration", () => {
       expect(tags).toContain("phase:1");
       expect(tags).toContain("seq:01");
       expect(tags).not.toContain("phase:");
+    });
+  });
+
+  describe("generateRoadmapFile", () => {
+    it("should throw NO_CONTEXT when no description and no vision", async () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "roadmap-test-"));
+      mkdirSync(join(tmpDir, ".ai-factory"), { recursive: true });
+      const db = testDb.current;
+      const projectId = crypto.randomUUID();
+      db.insert(projects)
+        .values({
+          id: projectId,
+          name: "Empty",
+          rootPath: tmpDir,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      await expect(generateRoadmapFile({ projectId })).rejects.toThrow(
+        "Cannot generate roadmap without project context",
+      );
+    });
+
+    it("should generate ROADMAP.md from DESCRIPTION.md", async () => {
+      const { projectId, tmpDir } = createProjectWithDescription("# My App\nA todo app");
+
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: "result",
+          subtype: "success",
+          result:
+            "# Project Roadmap\n\n> A todo app\n\n## Milestones\n\n- [ ] **Setup** — init\n- [ ] **Auth** — login\n\n## Completed\n\n| Milestone | Date |\n|-----------|------|\n",
+          usage: { input_tokens: 200, output_tokens: 100 },
+          total_cost_usd: 0.002,
+        };
+      });
+
+      const result = await generateRoadmapFile({ projectId });
+      expect(result.roadmapPath).toContain("ROADMAP.md");
+      expect(result.content).toContain("# Project Roadmap");
+      expect(result.content).toContain("Setup");
+
+      const { existsSync, readFileSync } = await import("node:fs");
+      expect(existsSync(result.roadmapPath)).toBe(true);
+      expect(readFileSync(result.roadmapPath, "utf8")).toContain("# Project Roadmap");
+    });
+
+    it("should accept vision without DESCRIPTION.md", async () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "roadmap-test-"));
+      mkdirSync(join(tmpDir, ".ai-factory"), { recursive: true });
+      const db = testDb.current;
+      const projectId = crypto.randomUUID();
+      db.insert(projects)
+        .values({
+          id: projectId,
+          name: "Vision Only",
+          rootPath: tmpDir,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .run();
+
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: "result",
+          subtype: "success",
+          result:
+            "# Project Roadmap\n\n> Build an e-commerce platform\n\n## Milestones\n\n- [ ] **Products** — catalog\n",
+          usage: {},
+          total_cost_usd: 0,
+        };
+      });
+
+      const result = await generateRoadmapFile({
+        projectId,
+        vision: "Build an e-commerce platform",
+      });
+      expect(result.content).toContain("e-commerce");
     });
   });
 

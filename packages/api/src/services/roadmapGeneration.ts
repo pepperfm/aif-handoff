@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { z } from "zod";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@aif/shared";
@@ -40,6 +40,158 @@ export interface RoadmapGenerationInput {
 export interface RoadmapGenerationResult {
   alias: string;
   tasks: GeneratedTask[];
+}
+
+export interface GenerateRoadmapFileInput {
+  projectId: string;
+  /** Optional user-provided vision/requirements to guide generation */
+  vision?: string;
+}
+
+export interface GenerateRoadmapFileResult {
+  roadmapPath: string;
+  content: string;
+}
+
+/**
+ * Generate a ROADMAP.md file for the project using Agent SDK.
+ * Reads DESCRIPTION.md and ARCHITECTURE.md for context, then produces
+ * a strategic milestone roadmap.
+ */
+export async function generateRoadmapFile(
+  input: GenerateRoadmapFileInput,
+): Promise<GenerateRoadmapFileResult> {
+  const { projectId, vision } = input;
+
+  log.info({ projectId }, "Starting roadmap file generation");
+
+  const project = findProjectById(projectId);
+  if (!project) {
+    throw new RoadmapGenerationError("PROJECT_NOT_FOUND", `Project ${projectId} not found`);
+  }
+
+  // Read project context
+  const descriptionPath = join(project.rootPath, ".ai-factory", "DESCRIPTION.md");
+  const architecturePath = join(project.rootPath, ".ai-factory", "ARCHITECTURE.md");
+
+  const description = existsSync(descriptionPath) ? readFileSync(descriptionPath, "utf8") : null;
+  const architecture = existsSync(architecturePath) ? readFileSync(architecturePath, "utf8") : null;
+
+  if (!description && !vision) {
+    throw new RoadmapGenerationError(
+      "NO_CONTEXT",
+      "No DESCRIPTION.md found and no vision provided. Cannot generate roadmap without project context.",
+    );
+  }
+
+  log.debug(
+    {
+      hasDescription: !!description,
+      hasArchitecture: !!architecture,
+      hasVision: !!vision,
+    },
+    "Project context loaded for roadmap generation",
+  );
+
+  const prompt = buildRoadmapGenerationPrompt({ description, architecture, vision });
+
+  let rawResult = "";
+  try {
+    for await (const message of query({
+      prompt,
+      options: {
+        cwd: project.rootPath,
+        settingSources: ["project"],
+        model: "sonnet",
+        maxThinkingTokens: 4096,
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append:
+            "Do not use tools or subagents. Reply directly with the ROADMAP.md content in markdown format. No JSON, no code fences around the entire output.",
+        },
+      },
+    })) {
+      if (message.type !== "result") continue;
+      if (message.subtype !== "success") {
+        throw new RoadmapGenerationError(
+          "AGENT_FAILED",
+          `Agent SDK query failed: ${message.subtype}`,
+        );
+      }
+      rawResult = message.result.trim();
+    }
+  } catch (err) {
+    if (err instanceof RoadmapGenerationError) throw err;
+    log.error({ err, projectId }, "Agent SDK roadmap generation error");
+    throw new RoadmapGenerationError(
+      "AGENT_UNAVAILABLE",
+      `Agent SDK unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!rawResult) {
+    throw new RoadmapGenerationError("EMPTY_RESPONSE", "Agent returned empty roadmap");
+  }
+
+  // Strip markdown fences if agent wrapped the whole output
+  const content = rawResult.replace(/^```(?:markdown)?\s*/m, "").replace(/\s*```\s*$/m, "");
+
+  // Write ROADMAP.md
+  const roadmapPath = join(project.rootPath, ".ai-factory", "ROADMAP.md");
+  mkdirSync(dirname(roadmapPath), { recursive: true });
+  writeFileSync(roadmapPath, content, "utf8");
+
+  log.info({ projectId, roadmapPath, contentLength: content.length }, "Roadmap file generated");
+
+  return { roadmapPath, content };
+}
+
+function buildRoadmapGenerationPrompt(ctx: {
+  description: string | null;
+  architecture: string | null;
+  vision: string | null;
+}): string {
+  const sections: string[] = [];
+
+  if (ctx.description) {
+    sections.push(`PROJECT DESCRIPTION:\n<<<DESC\n${ctx.description}\nDESC`);
+  }
+  if (ctx.architecture) {
+    sections.push(`ARCHITECTURE:\n<<<ARCH\n${ctx.architecture}\nARCH`);
+  }
+  if (ctx.vision) {
+    sections.push(`USER VISION / REQUIREMENTS:\n<<<VISION\n${ctx.vision}\nVISION`);
+  }
+
+  return `You are creating a strategic project roadmap based on the project context below.
+
+${sections.join("\n\n")}
+
+Generate a ROADMAP.md file with the following format:
+
+# Project Roadmap
+
+> <one-line project vision>
+
+## Milestones
+
+- [ ] **Milestone Name** — short description of what this achieves
+- [ ] **Milestone Name** — short description of what this achieves
+
+## Completed
+
+| Milestone | Date |
+|-----------|------|
+
+Rules:
+- Each milestone is a HIGH-LEVEL goal, not a granular task
+- 5-15 milestones is the sweet spot
+- Order by logical sequence (dependencies first)
+- If something appears already built based on the description, mark it [x] and add to Completed table with today's date
+- Milestones should be specific and actionable, not vague
+- Cover the full scope of the project from current state to production-ready
+- Output ONLY the markdown content for ROADMAP.md, nothing else`;
 }
 
 /**

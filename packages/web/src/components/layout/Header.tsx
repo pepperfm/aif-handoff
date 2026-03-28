@@ -55,6 +55,7 @@ export function Header({
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [roadmapAlias, setRoadmapAlias] = useState("");
+  const [roadmapVision, setRoadmapVision] = useState("");
   const [roadmapLoading, setRoadmapLoading] = useState(false);
   const [roadmapError, setRoadmapError] = useState<string | null>(null);
   const [roadmapResult, setRoadmapResult] = useState<RoadmapImportResult | null>(null);
@@ -93,25 +94,29 @@ export function Header({
     setSettings({ sound: !settings.sound });
   }, [setSettings, settings.sound]);
 
-  const handleRoadmapImport = useCallback(async () => {
+  const handleRoadmapGenerate = useCallback(async () => {
     if (!selectedProject || !roadmapAlias.trim()) return;
     setRoadmapLoading(true);
     setRoadmapError(null);
     setRoadmapResult(null);
     try {
-      console.debug("[roadmap] Importing with alias:", roadmapAlias);
-      const result = await api.importRoadmap(selectedProject.id, roadmapAlias.trim());
-      console.debug("[roadmap] Import result:", result);
+      console.debug("[roadmap] Generating with alias:", roadmapAlias);
+      const result = await api.generateRoadmap(
+        selectedProject.id,
+        roadmapAlias.trim(),
+        roadmapVision.trim() || undefined,
+      );
+      console.debug("[roadmap] Generate result:", result);
       setRoadmapResult(result);
       onRoadmapImportComplete?.(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error("[roadmap] Import failed:", message);
+      console.error("[roadmap] Generation failed:", message);
       setRoadmapError(message);
     } finally {
       setRoadmapLoading(false);
     }
-  }, [selectedProject, roadmapAlias, onRoadmapImportComplete]);
+  }, [selectedProject, roadmapAlias, roadmapVision, onRoadmapImportComplete]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/65">
@@ -198,6 +203,7 @@ export function Header({
           <button
             onClick={() => {
               setRoadmapAlias("");
+              setRoadmapVision("");
               setRoadmapError(null);
               setRoadmapResult(null);
               setRoadmapOpen(true);
@@ -355,7 +361,7 @@ export function Header({
           {roadmapResult ? (
             <div className="space-y-3">
               <div className="border border-green-500/30 bg-green-500/10 px-3 py-2">
-                <p className="text-sm font-medium text-green-400">Import complete</p>
+                <p className="text-sm font-medium text-green-400">Roadmap generated</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   Created {roadmapResult.created} task{roadmapResult.created !== 1 ? "s" : ""}
                   {roadmapResult.skipped > 0 &&
@@ -376,7 +382,8 @@ export function Header({
           ) : (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Read the project ROADMAP.md and generate backlog tasks with an alias for grouping.
+                Generate a project roadmap from DESCRIPTION.md, then create backlog tasks
+                automatically.
               </p>
               <div>
                 <label htmlFor="roadmap-alias" className="block text-xs font-medium mb-1">
@@ -390,26 +397,36 @@ export function Header({
                   placeholder="e.g. v1.0, sprint-1, mvp"
                   className="w-full border border-border bg-background px-2 py-1.5 text-sm placeholder:text-muted-foreground focus:border-primary/70 focus:outline-none"
                   disabled={roadmapLoading}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && roadmapAlias.trim()) {
-                      void handleRoadmapImport();
-                    }
-                  }}
+                />
+              </div>
+              <div>
+                <label htmlFor="roadmap-vision" className="block text-xs font-medium mb-1">
+                  Vision / requirements{" "}
+                  <span className="text-muted-foreground font-normal">(optional)</span>
+                </label>
+                <textarea
+                  id="roadmap-vision"
+                  value={roadmapVision}
+                  onChange={(e) => setRoadmapVision(e.target.value)}
+                  placeholder="Describe what you want to build, priorities, or constraints..."
+                  rows={3}
+                  className="w-full border border-border bg-background px-2 py-1.5 text-sm placeholder:text-muted-foreground focus:border-primary/70 focus:outline-none resize-none"
+                  disabled={roadmapLoading}
                 />
               </div>
               {roadmapError && <p className="text-xs text-destructive">{roadmapError}</p>}
               <button
-                onClick={() => void handleRoadmapImport()}
+                onClick={() => void handleRoadmapGenerate()}
                 disabled={roadmapLoading || !roadmapAlias.trim()}
                 className="w-full border border-border bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 {roadmapLoading ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Importing...
+                    Generating...
                   </>
                 ) : (
-                  "Import"
+                  "Generate Roadmap"
                 )}
               </button>
             </div>

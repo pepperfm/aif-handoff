@@ -70,3 +70,8 @@ export const broadcastTaskSchema = z.object({
 export const roadmapImportSchema = z.object({
   roadmapAlias: z.string().min(1, "Roadmap alias is required").max(200),
 });
+
+export const roadmapGenerateSchema = z.object({
+  roadmapAlias: z.string().min(1, "Roadmap alias is required").max(200),
+  vision: z.string().max(10000).optional(),
+});
