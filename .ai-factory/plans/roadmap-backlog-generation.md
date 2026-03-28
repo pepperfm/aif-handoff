@@ -59,13 +59,13 @@ Created: 2026-03-28
 
 ### Phase 4: UI Trigger and UX Feedback
 
-- [ ] Task 7: Add UI button to trigger roadmap import for the selected project.
+- [x] Task 7: Add UI button to trigger roadmap import for the selected project.
   Deliverable: add `Generate Roadmap` action in header or command surface, disabled when no project is selected, with loading/disabled states during request.
   Files: `packages/web/src/components/layout/Header.tsx`, `packages/web/src/App.tsx`, `packages/web/src/lib/api.ts`, `packages/web/src/hooks/useTasks.ts` (or dedicated mutation hook).
   Logging: `console.debug` request lifecycle in API client; UI-level error logs with request id/alias if response fails.
   Depends on: Task 5.
 
-- [ ] Task 8: Show import result and provide filtering/grouping entry points by roadmap alias and phase tags.
+- [x] Task 8: Show import result and provide filtering/grouping entry points by roadmap alias and phase tags.
   Deliverable: success/error notification with counts and alias; minimum UX support to identify generated group (filter pill or quick action by `rm:<alias>`).
   Files: `packages/web/src/components/layout/Header.tsx`, `packages/web/src/components/kanban/Board.tsx`, `packages/web/src/lib/notifications.ts` (if required).
   Logging: DEBUG result payload rendering and filter activation events.

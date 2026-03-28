@@ -10,6 +10,8 @@ function makeTask(overrides: Partial<Task>): Task {
     description: "",
     autoMode: true,
     isFix: false,
+    roadmapAlias: null,
+    tags: [],
     status: "backlog",
     priority: 1,
     position: 1000,
@@ -32,10 +34,37 @@ function makeTask(overrides: Partial<Task>): Task {
 describe("calculateTaskMetrics", () => {
   it("aggregates completion, tokens and cost", () => {
     const tasks: Task[] = [
-      makeTask({ status: "done", tokenInput: 1000, tokenOutput: 300, tokenTotal: 1300, costUsd: 1.25 }),
-      makeTask({ status: "verified", tokenInput: 700, tokenOutput: 200, tokenTotal: 900, costUsd: 0.75, isFix: true }),
-      makeTask({ status: "implementing", tokenInput: 500, tokenOutput: 100, tokenTotal: 600, costUsd: 0.5, retryCount: 2 }),
-      makeTask({ status: "blocked_external", tokenInput: 0, tokenOutput: 0, tokenTotal: 0, costUsd: 0, autoMode: false }),
+      makeTask({
+        status: "done",
+        tokenInput: 1000,
+        tokenOutput: 300,
+        tokenTotal: 1300,
+        costUsd: 1.25,
+      }),
+      makeTask({
+        status: "verified",
+        tokenInput: 700,
+        tokenOutput: 200,
+        tokenTotal: 900,
+        costUsd: 0.75,
+        isFix: true,
+      }),
+      makeTask({
+        status: "implementing",
+        tokenInput: 500,
+        tokenOutput: 100,
+        tokenTotal: 600,
+        costUsd: 0.5,
+        retryCount: 2,
+      }),
+      makeTask({
+        status: "blocked_external",
+        tokenInput: 0,
+        tokenOutput: 0,
+        tokenTotal: 0,
+        costUsd: 0,
+        autoMode: false,
+      }),
     ];
 
     const summary = calculateTaskMetrics(tasks);

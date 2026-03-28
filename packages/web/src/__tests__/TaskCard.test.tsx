@@ -11,6 +11,10 @@ const mockTask: Task = {
   description: "A sample description that might be quite long and should be truncated",
   autoMode: true,
   isFix: false,
+  reworkRequested: false,
+  lastHeartbeatAt: null,
+  roadmapAlias: null,
+  tags: [],
   status: "backlog",
   priority: 3,
   position: 1000,
@@ -34,9 +38,7 @@ describe("TaskCard", () => {
 
   it("should render task description", () => {
     render(<TaskCard task={mockTask} onClick={vi.fn()} />);
-    expect(
-      screen.getByText(/A sample description/)
-    ).toBeDefined();
+    expect(screen.getByText(/A sample description/)).toBeDefined();
   });
 
   it("should render priority badge for priority > 0", () => {

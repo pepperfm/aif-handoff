@@ -169,4 +169,25 @@ export const api = {
     console.debug("[api] GET /tasks/%s/plan-file-status", id);
     return request<{ exists: boolean; path: string }>(`${API_BASE}/${id}/plan-file-status`);
   },
+
+  importRoadmap(
+    projectId: string,
+    roadmapAlias: string,
+  ): Promise<{
+    roadmapAlias: string;
+    created: number;
+    skipped: number;
+    taskIds: string[];
+    byPhase: Record<number, { created: number; skipped: number }>;
+  }> {
+    console.debug("[api] POST /projects/%s/roadmap/import", projectId, { roadmapAlias });
+    return request(
+      `/projects/${projectId}/roadmap/import`,
+      {
+        method: "POST",
+        body: JSON.stringify({ roadmapAlias }),
+      },
+      120000,
+    );
+  },
 };

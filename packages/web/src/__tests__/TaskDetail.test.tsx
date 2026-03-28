@@ -11,6 +11,10 @@ const mockTask: Task = {
   attachments: [],
   autoMode: true,
   isFix: false,
+  reworkRequested: false,
+  lastHeartbeatAt: null,
+  roadmapAlias: null,
+  tags: [],
   status: "implementing",
   priority: 2,
   position: 1000,
@@ -110,23 +114,31 @@ vi.mock("@/hooks/useTasks", () => ({
           ? mockDoneTask
           : id === "detail-backlog"
             ? mockBacklogTask
-              : id === "detail-blocked"
-                ? mockBlockedTask
-                : id === "detail-plan-ready-manual"
-                  ? mockPlanReadyManualTask
-                  : id === "detail-review"
-                    ? mockReviewTask
-                    : id === "detail-with-attachment"
-                      ? mockTaskWithAttachment
-                      : id === "detail-no-plan-no-log"
-                        ? mockTaskNoPlanNoLog
-                : null,
+            : id === "detail-blocked"
+              ? mockBlockedTask
+              : id === "detail-plan-ready-manual"
+                ? mockPlanReadyManualTask
+                : id === "detail-review"
+                  ? mockReviewTask
+                  : id === "detail-with-attachment"
+                    ? mockTaskWithAttachment
+                    : id === "detail-no-plan-no-log"
+                      ? mockTaskNoPlanNoLog
+                      : null,
   }),
   useUpdateTask: () => ({ mutate: mutateUpdateTask }),
   useDeleteTask: () => ({ mutate: mutateDeleteTask }),
-  useTaskEvent: () => ({ mutate: mutateTaskEvent, mutateAsync: mutateTaskEventAsync, isPending: false }),
+  useTaskEvent: () => ({
+    mutate: mutateTaskEvent,
+    mutateAsync: mutateTaskEventAsync,
+    isPending: false,
+  }),
   useTaskComments: () => ({ data: [], isLoading: false }),
-  useCreateTaskComment: () => ({ mutate: mutateCreateComment, mutateAsync: mutateCreateCommentAsync, isPending: false }),
+  useCreateTaskComment: () => ({
+    mutate: mutateCreateComment,
+    mutateAsync: mutateCreateCommentAsync,
+    isPending: false,
+  }),
   useSyncTaskPlan: () => ({ mutate: mutateSyncTaskPlan, isPending: false }),
 }));
 
@@ -151,48 +163,38 @@ describe("TaskDetail", () => {
     mockGetTaskPlanFileStatus.mockReset();
     mutateTaskEventAsync.mockResolvedValue(undefined);
     mutateCreateCommentAsync.mockResolvedValue(undefined);
-    mockGetTaskPlanFileStatus.mockResolvedValue({ exists: false, path: "/tmp/.ai-factory/PLAN.md" });
+    mockGetTaskPlanFileStatus.mockResolvedValue({
+      exists: false,
+      path: "/tmp/.ai-factory/PLAN.md",
+    });
   });
 
   it("should render nothing when taskId is null", () => {
-    const { container } = render(
-      <TaskDetail taskId={null} onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    const { container } = render(<TaskDetail taskId={null} onClose={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
     // Sheet should not be visible
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("should render task title when open", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
     expect(screen.getByText("Detail Task")).toBeDefined();
   });
 
   it("should render task description", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
     expect(screen.getAllByText("Full description here").length).toBeGreaterThan(0);
   });
 
   it("should render implementation log", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
     fireEvent.click(screen.getByText("Implementation"));
     expect(screen.getAllByText("Created files X and Y").length).toBeGreaterThan(0);
   });
 
   it("should render agent activity timeline", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
     fireEvent.click(screen.getByText("Activity"));
     expect(screen.getAllByText("Read").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Write").length).toBeGreaterThan(0);
@@ -200,10 +202,7 @@ describe("TaskDetail", () => {
   });
 
   it("should clear agent activity log with confirmation", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Activity"));
     fireEvent.click(screen.getByRole("button", { name: "Clear log" }));
@@ -214,30 +213,21 @@ describe("TaskDetail", () => {
         id: "detail-1",
         input: { agentActivityLog: null },
       },
-      expect.any(Object)
+      expect.any(Object),
     );
   });
 
   it("should sync plan from file with confirmation", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByRole("button", { name: "Sync" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Sync" })[1]);
 
-    expect(mutateSyncTaskPlan).toHaveBeenCalledWith(
-      "detail-1",
-      expect.any(Object)
-    );
+    expect(mutateSyncTaskPlan).toHaveBeenCalledWith("detail-1", expect.any(Object));
   });
 
   it("should hide clear log and sync buttons when log and plan are missing", () => {
-    render(
-      <TaskDetail taskId="detail-no-plan-no-log" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-no-plan-no-log" onClose={vi.fn()} />, { wrapper: Wrapper });
 
     expect(screen.queryByRole("button", { name: "Sync" })).toBeNull();
     fireEvent.click(screen.getByText("Activity"));
@@ -245,28 +235,19 @@ describe("TaskDetail", () => {
   });
 
   it("should show delete button", () => {
-    render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, { wrapper: Wrapper });
     expect(screen.getAllByText("Delete task").length).toBeGreaterThan(0);
   });
 
   it("should show human decision actions for done tasks", () => {
-    render(
-      <TaskDetail taskId="detail-done" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-done" onClose={vi.fn()} />, { wrapper: Wrapper });
     expect(screen.getByText("Approve")).toBeDefined();
     expect(screen.getByText("Request changes")).toBeDefined();
   });
 
   it("should submit request changes with comment for done task", async () => {
     const onClose = vi.fn();
-    render(
-      <TaskDetail taskId="detail-done" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-done" onClose={onClose} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
     expect(screen.getByText("Request Changes")).toBeDefined();
@@ -292,10 +273,7 @@ describe("TaskDetail", () => {
 
   it("should trigger start_ai event from backlog action when plan file does not exist", async () => {
     const onClose = vi.fn();
-    render(
-      <TaskDetail taskId="detail-backlog" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-backlog" onClose={onClose} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Start AI"));
     await waitFor(() => {
@@ -315,10 +293,7 @@ describe("TaskDetail", () => {
       path: "/tmp/project/.ai-factory/PLAN.md",
     });
 
-    render(
-      <TaskDetail taskId="detail-backlog" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-backlog" onClose={onClose} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Start AI"));
     await waitFor(() => {
@@ -341,10 +316,7 @@ describe("TaskDetail", () => {
       path: "/tmp/project/.ai-factory/PLAN.md",
     });
 
-    render(
-      <TaskDetail taskId="detail-backlog" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-backlog" onClose={onClose} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Start AI"));
     await waitFor(() => {
@@ -358,10 +330,7 @@ describe("TaskDetail", () => {
 
   it("should trigger retry_from_blocked event from blocked action", () => {
     const onClose = vi.fn();
-    render(
-      <TaskDetail taskId="detail-blocked" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-blocked" onClose={onClose} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Retry"));
     expect(mutateTaskEvent).toHaveBeenCalledWith({
@@ -373,10 +342,9 @@ describe("TaskDetail", () => {
 
   it("should trigger start_implementation for manual plan_ready", () => {
     const onClose = vi.fn();
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />, {
+      wrapper: Wrapper,
+    });
 
     fireEvent.click(screen.getByText("Start implementation"));
     expect(mutateTaskEvent).toHaveBeenCalledWith({
@@ -387,34 +355,34 @@ describe("TaskDetail", () => {
   });
 
   it("should render request replanning action for manual plan_ready", () => {
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
 
     expect(screen.getByText("Request replanning")).toBeDefined();
   });
 
   it("should render fast fix action for manual plan_ready", () => {
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
 
     expect(screen.getByText("Fast fix")).toBeDefined();
   });
 
   it("should submit replanning request and move task to planning", async () => {
     const onClose = vi.fn();
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />, {
+      wrapper: Wrapper,
+    });
 
     fireEvent.click(screen.getByText("Request replanning"));
-    fireEvent.change(screen.getByPlaceholderText("Describe what needs to be changed in the plan..."), {
-      target: { value: "Need more concrete API milestones" },
-    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe what needs to be changed in the plan..."),
+      {
+        target: { value: "Need more concrete API milestones" },
+      },
+    );
     fireEvent.click(screen.getByText("Send"));
 
     await waitFor(() => {
@@ -433,10 +401,9 @@ describe("TaskDetail", () => {
   });
 
   it("should open and cancel replanning modal", () => {
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
 
     fireEvent.click(screen.getByText("Request replanning"));
     expect(screen.getByText("Request Replanning")).toBeDefined();
@@ -446,10 +413,9 @@ describe("TaskDetail", () => {
 
   it("should submit fast fix request without moving status", async () => {
     const onClose = vi.fn();
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={onClose} />, {
+      wrapper: Wrapper,
+    });
 
     fireEvent.click(screen.getByText("Fast fix"));
     fireEvent.change(screen.getByPlaceholderText("Describe the quick plan fix..."), {
@@ -475,20 +441,16 @@ describe("TaskDetail", () => {
   });
 
   it("should render review comments in review tab", () => {
-    render(
-      <TaskDetail taskId="detail-review" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-review" onClose={vi.fn()} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Review"));
     expect(screen.getByText("Looks good after minor cleanup")).toBeDefined();
   });
 
   it("should upload task attachment and call update mutation", async () => {
-    const { container } = render(
-      <TaskDetail taskId="detail-1" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    const { container } = render(<TaskDetail taskId="detail-1" onClose={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
 
     fireEvent.click(screen.getByText("Show attachments (0)"));
     const fileInput = container.querySelector('input[type="file"][multiple]') as HTMLInputElement;
@@ -518,10 +480,7 @@ describe("TaskDetail", () => {
   });
 
   it("should remove task attachment", () => {
-    render(
-      <TaskDetail taskId="detail-with-attachment" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-with-attachment" onClose={vi.fn()} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Show attachments (1)"));
     fireEvent.click(screen.getByText("Remove"));
@@ -540,10 +499,7 @@ describe("TaskDetail", () => {
       options.onSuccess?.();
     });
 
-    render(
-      <TaskDetail taskId="detail-1" onClose={onClose} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-1" onClose={onClose} />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByText("Delete task"));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -553,15 +509,17 @@ describe("TaskDetail", () => {
   });
 
   it("should include uploaded text attachment in replanning request", async () => {
-    render(
-      <TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />,
-      { wrapper: Wrapper }
-    );
+    render(<TaskDetail taskId="detail-plan-ready-manual" onClose={vi.fn()} />, {
+      wrapper: Wrapper,
+    });
 
     fireEvent.click(screen.getByText("Request replanning"));
-    fireEvent.change(screen.getByPlaceholderText("Describe what needs to be changed in the plan..."), {
-      target: { value: "Please split backend and frontend tasks" },
-    });
+    fireEvent.change(
+      screen.getByPlaceholderText("Describe what needs to be changed in the plan..."),
+      {
+        target: { value: "Please split backend and frontend tasks" },
+      },
+    );
 
     const fileInputs = document.querySelectorAll('input[type="file"]');
     const fileInput = fileInputs[fileInputs.length - 1] as HTMLInputElement;

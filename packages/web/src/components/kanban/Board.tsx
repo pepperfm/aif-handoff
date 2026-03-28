@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { readStorage, writeStorage } from "@/lib/storage";
 import { STORAGE_KEYS } from "@/lib/storageKeys";
 
-type QuickFilter = "mine" | "blocked" | "recent" | "no_plan";
+type QuickFilter = "mine" | "blocked" | "recent" | "no_plan" | "roadmap";
 type ViewMode = "kanban" | "list";
 type ListSort = "updated_desc" | "updated_asc" | "priority_desc" | "priority_asc" | "status";
 
@@ -24,7 +24,10 @@ const FILTER_LABELS: Record<QuickFilter, string> = {
   blocked: "blocked",
   recent: "recent",
   no_plan: "no plan",
+  roadmap: "roadmap",
 };
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const RECENT_CUTOFF_REFERENCE_TS = Date.now();
 
 const STATUS_ORDER = Object.fromEntries(
   ORDERED_STATUSES.map((status, idx) => [status, idx]),
@@ -69,10 +72,12 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
       if (activeFilters.includes("blocked") && task.status !== "blocked_external") return false;
       if (activeFilters.includes("recent")) {
         const updatedTs = new Date(task.updatedAt).getTime();
-        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        const oneDayAgo = RECENT_CUTOFF_REFERENCE_TS - ONE_DAY_MS;
         if (updatedTs < oneDayAgo) return false;
       }
       if (activeFilters.includes("no_plan") && (task.plan?.trim()?.length ?? 0) > 0) return false;
+      if (activeFilters.includes("roadmap") && (!task.tags || !task.tags.includes("roadmap")))
+        return false;
       return true;
     });
   }, [activeFilters, tasks]);

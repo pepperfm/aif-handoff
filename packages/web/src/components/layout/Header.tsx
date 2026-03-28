@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Bell, Moon, Sun, Command, ChartColumn } from "lucide-react";
+import { Bell, Moon, Sun, Command, ChartColumn, Map, Loader2 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import {
   getDesktopNotificationPermission,
@@ -8,8 +8,22 @@ import {
 } from "@/hooks/useNotificationSettings";
 import { ProjectSelector } from "@/components/project/ProjectSelector";
 import type { Project } from "@aif/shared/browser";
-import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { TaskMetricsSummary } from "@/lib/taskMetrics";
+import { api } from "@/lib/api";
+
+export interface RoadmapImportResult {
+  roadmapAlias: string;
+  created: number;
+  skipped: number;
+  taskIds: string[];
+}
 
 interface Props {
   selectedProject: Project | null;
@@ -21,6 +35,7 @@ interface Props {
   viewMode: "kanban" | "list";
   onViewModeChange: (mode: "kanban" | "list") => void;
   taskMetrics: TaskMetricsSummary;
+  onRoadmapImportComplete?: (result: RoadmapImportResult) => void;
 }
 
 export function Header({
@@ -33,10 +48,16 @@ export function Header({
   viewMode,
   onViewModeChange,
   taskMetrics,
+  onRoadmapImportComplete,
 }: Props) {
   const { theme, toggleTheme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [metricsOpen, setMetricsOpen] = useState(false);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [roadmapAlias, setRoadmapAlias] = useState("");
+  const [roadmapLoading, setRoadmapLoading] = useState(false);
+  const [roadmapError, setRoadmapError] = useState<string | null>(null);
+  const [roadmapResult, setRoadmapResult] = useState<RoadmapImportResult | null>(null);
   const { settings, setSettings } = useNotificationSettings();
   const permission = getDesktopNotificationPermission();
   const isCompact = density === "compact";
@@ -72,9 +93,31 @@ export function Header({
     setSettings({ sound: !settings.sound });
   }, [setSettings, settings.sound]);
 
+  const handleRoadmapImport = useCallback(async () => {
+    if (!selectedProject || !roadmapAlias.trim()) return;
+    setRoadmapLoading(true);
+    setRoadmapError(null);
+    setRoadmapResult(null);
+    try {
+      console.debug("[roadmap] Importing with alias:", roadmapAlias);
+      const result = await api.importRoadmap(selectedProject.id, roadmapAlias.trim());
+      console.debug("[roadmap] Import result:", result);
+      setRoadmapResult(result);
+      onRoadmapImportComplete?.(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[roadmap] Import failed:", message);
+      setRoadmapError(message);
+    } finally {
+      setRoadmapLoading(false);
+    }
+  }, [selectedProject, roadmapAlias, onRoadmapImportComplete]);
+
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/65">
-      <div className={`mx-auto flex w-full max-w-[1680px] items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}>
+      <div
+        className={`mx-auto flex w-full max-w-[1680px] items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}
+      >
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold tracking-tight text-primary">&gt;</span>
           <div className="h-5 w-px bg-border" />
@@ -92,8 +135,7 @@ export function Header({
             aria-label="Open command palette"
             type="button"
           >
-            <Command className="h-3.5 w-3.5" />
-            K
+            <Command className="h-3.5 w-3.5" />K
           </button>
 
           <div className="hidden h-8 border border-border bg-card md:flex">
@@ -151,11 +193,22 @@ export function Header({
             className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-foreground transition-colors hover:border-primary/70 hover:bg-accent"
             aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
           >
-            {theme === "dark" ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+          <button
+            onClick={() => {
+              setRoadmapAlias("");
+              setRoadmapError(null);
+              setRoadmapResult(null);
+              setRoadmapOpen(true);
+            }}
+            disabled={!selectedProject}
+            className="inline-flex h-8 items-center gap-1 border border-border bg-card px-2 text-[10px] font-mono text-foreground transition-colors hover:border-primary/70 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Generate roadmap tasks"
+            type="button"
+          >
+            <Map className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">ROADMAP</span>
           </button>
           <button
             onClick={() => setMetricsOpen(true)}
@@ -236,14 +289,16 @@ export function Header({
               <p className="text-xs text-muted-foreground">Completed tasks</p>
               <p className="text-lg font-semibold">{formatInteger(taskMetrics.completedTasks)}</p>
               <p className="text-xs text-muted-foreground">
-                {formatPercent(taskMetrics.completionRate)} of {formatInteger(taskMetrics.totalTasks)}
+                {formatPercent(taskMetrics.completionRate)} of{" "}
+                {formatInteger(taskMetrics.totalTasks)}
               </p>
             </div>
             <div className="border border-border bg-card/50 px-3 py-2">
               <p className="text-xs text-muted-foreground">Total token usage</p>
               <p className="text-lg font-semibold">{formatInteger(taskMetrics.totalTokenTotal)}</p>
               <p className="text-xs text-muted-foreground">
-                in {formatInteger(taskMetrics.totalTokenInput)} / out {formatInteger(taskMetrics.totalTokenOutput)}
+                in {formatInteger(taskMetrics.totalTokenInput)} / out{" "}
+                {formatInteger(taskMetrics.totalTokenOutput)}
               </p>
             </div>
             <div className="border border-border bg-card/50 px-3 py-2">
@@ -255,7 +310,9 @@ export function Header({
             </div>
             <div className="border border-border bg-card/50 px-3 py-2">
               <p className="text-xs text-muted-foreground">Average tokens per task</p>
-              <p className="text-lg font-semibold">{formatInteger(taskMetrics.averageTokensPerTask)}</p>
+              <p className="text-lg font-semibold">
+                {formatInteger(taskMetrics.averageTokensPerTask)}
+              </p>
               <p className="text-xs text-muted-foreground">across all tracked tasks</p>
             </div>
           </div>
@@ -287,6 +344,76 @@ export function Header({
               </p>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={roadmapOpen} onOpenChange={setRoadmapOpen}>
+        <DialogContent>
+          <DialogClose onClose={() => setRoadmapOpen(false)} />
+          <DialogHeader>
+            <DialogTitle>Import Roadmap Tasks</DialogTitle>
+          </DialogHeader>
+          {roadmapResult ? (
+            <div className="space-y-3">
+              <div className="border border-green-500/30 bg-green-500/10 px-3 py-2">
+                <p className="text-sm font-medium text-green-400">Import complete</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Created {roadmapResult.created} task{roadmapResult.created !== 1 ? "s" : ""}
+                  {roadmapResult.skipped > 0 &&
+                    `, skipped ${roadmapResult.skipped} duplicate${roadmapResult.skipped !== 1 ? "s" : ""}`}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Alias:{" "}
+                  <span className="font-mono text-foreground">{roadmapResult.roadmapAlias}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setRoadmapOpen(false)}
+                className="w-full border border-border bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+              >
+                Close
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Read the project ROADMAP.md and generate backlog tasks with an alias for grouping.
+              </p>
+              <div>
+                <label htmlFor="roadmap-alias" className="block text-xs font-medium mb-1">
+                  Roadmap alias
+                </label>
+                <input
+                  id="roadmap-alias"
+                  type="text"
+                  value={roadmapAlias}
+                  onChange={(e) => setRoadmapAlias(e.target.value)}
+                  placeholder="e.g. v1.0, sprint-1, mvp"
+                  className="w-full border border-border bg-background px-2 py-1.5 text-sm placeholder:text-muted-foreground focus:border-primary/70 focus:outline-none"
+                  disabled={roadmapLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && roadmapAlias.trim()) {
+                      void handleRoadmapImport();
+                    }
+                  }}
+                />
+              </div>
+              {roadmapError && <p className="text-xs text-destructive">{roadmapError}</p>}
+              <button
+                onClick={() => void handleRoadmapImport()}
+                disabled={roadmapLoading || !roadmapAlias.trim()}
+                className="w-full border border-border bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {roadmapLoading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  "Import"
+                )}
+              </button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </header>

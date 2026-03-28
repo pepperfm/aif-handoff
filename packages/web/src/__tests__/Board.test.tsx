@@ -21,6 +21,11 @@ const mockTasks: Task[] = [
     blockedReason: null,
     blockedFromStatus: null,
     retryAfter: null,
+    isFix: false,
+    reworkRequested: false,
+    lastHeartbeatAt: null,
+    roadmapAlias: null,
+    tags: [],
     retryCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -41,6 +46,11 @@ const mockTasks: Task[] = [
     blockedReason: null,
     blockedFromStatus: null,
     retryAfter: null,
+    isFix: false,
+    reworkRequested: false,
+    lastHeartbeatAt: null,
+    roadmapAlias: null,
+    tags: [],
     retryCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -70,7 +80,9 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 describe("Board", () => {
   it("should render status columns", () => {
-    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, { wrapper: Wrapper });
+    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
+      wrapper: Wrapper,
+    });
 
     expect(screen.getByText("Backlog")).toBeDefined();
     expect(screen.getByText("Planning")).toBeDefined();
@@ -83,14 +95,18 @@ describe("Board", () => {
   });
 
   it("should render task cards in correct columns", () => {
-    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, { wrapper: Wrapper });
+    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
+      wrapper: Wrapper,
+    });
 
     expect(screen.getByText("Test Task 1")).toBeDefined();
     expect(screen.getByText("Test Task 2")).toBeDefined();
   });
 
   it("should render ownership badges", () => {
-    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, { wrapper: Wrapper });
+    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
+      wrapper: Wrapper,
+    });
 
     expect(screen.getAllByText("AI controlled").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Human controlled").length).toBeGreaterThan(0);
@@ -98,7 +114,9 @@ describe("Board", () => {
   });
 
   it("should show task descriptions", () => {
-    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, { wrapper: Wrapper });
+    render(<Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" />, {
+      wrapper: Wrapper,
+    });
 
     expect(screen.getByText("Description 1")).toBeDefined();
     expect(screen.getByText("Description 2")).toBeDefined();
@@ -106,8 +124,13 @@ describe("Board", () => {
 
   it("should render list view", () => {
     render(
-      <Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" viewMode="list" />,
-      { wrapper: Wrapper }
+      <Board
+        projectId="test-project"
+        onTaskClick={vi.fn()}
+        density="comfortable"
+        viewMode="list"
+      />,
+      { wrapper: Wrapper },
     );
 
     expect(screen.getByText("Task")).toBeDefined();
@@ -118,8 +141,13 @@ describe("Board", () => {
 
   it("should filter list view by search query", () => {
     render(
-      <Board projectId="test-project" onTaskClick={vi.fn()} density="comfortable" viewMode="list" />,
-      { wrapper: Wrapper }
+      <Board
+        projectId="test-project"
+        onTaskClick={vi.fn()}
+        density="comfortable"
+        viewMode="list"
+      />,
+      { wrapper: Wrapper },
     );
 
     const searchInput = screen.getByPlaceholderText("Search by title, description, id, status");
