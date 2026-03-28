@@ -349,3 +349,15 @@ export function incrementTaskTokenUsage(
 
   return delta;
 }
+
+/**
+ * Find existing tasks that match the given project + roadmap alias combination.
+ * Used for deduplication during roadmap import.
+ */
+export function findTasksByRoadmapAlias(projectId: string, alias: string): TaskRow[] {
+  return getDb()
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.projectId, projectId), eq(tasks.roadmapAlias, alias)))
+    .all();
+}

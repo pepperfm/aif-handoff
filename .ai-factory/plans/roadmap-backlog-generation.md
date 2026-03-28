@@ -31,12 +31,12 @@ Created: 2026-03-28
 
 ### Phase 2: Roadmap Parsing and Agent Query Orchestration
 
-- [ ] Task 3: Implement roadmap extraction service that reads `.ai-factory/ROADMAP.md` and calls Agent SDK query for strict JSON conversion.
+- [x] Task 3: Implement roadmap extraction service that reads `.ai-factory/ROADMAP.md` and calls Agent SDK query for strict JSON conversion.
   Deliverable: service that (a) verifies roadmap file exists, (b) sends second query with strict JSON schema instructions, (c) parses and validates response via zod, (d) returns normalized generation payload.
   Files: `packages/api/src/services/roadmapGeneration.ts` (new), `packages/api/src/schemas.ts` (new zod schemas for generator response).
   Logging: INFO start/finish with project and roadmap alias, DEBUG for sanitized raw agent output and normalization steps, ERROR with structured parse/validation failures.
 
-- [ ] Task 4: Add dedupe and tag enrichment policy for generated tasks.
+- [x] Task 4: Add dedupe and tag enrichment policy for generated tasks.
   Deliverable: deterministic dedupe by `projectId + normalizedTitle + roadmapAlias` and automatic tag enrichment:
   required tags: `roadmap`, `rm:<alias>`, `phase:<number>`, `phase:<name>`, `seq:<nn>`.
   Files: `packages/api/src/services/roadmapGeneration.ts`, `packages/api/src/repositories/tasks.ts` (helper selectors for dedupe lookup).
