@@ -80,7 +80,7 @@ export function TaskCard({ task, onClick, overlay, density = "comfortable" }: Ta
         <div className={`flex flex-wrap gap-1 ${isCompact ? "mt-0.5 pl-1.5" : "mt-1.5 pl-2"}`}>
           {task.roadmapAlias && (
             <Badge
-              className={`${isCompact ? "px-1 py-0 text-[9px]" : "px-1.5 py-0 text-[10px]"} border-violet-500/35 bg-violet-500/15 text-violet-300`}
+              className={`${isCompact ? "px-1 py-0 text-[9px]" : "px-1.5 py-0 text-[10px]"} border-violet-500/35 bg-violet-500/15 text-violet-600 dark:text-violet-300`}
             >
               {task.roadmapAlias}
             </Badge>
@@ -90,7 +90,7 @@ export function TaskCard({ task, onClick, overlay, density = "comfortable" }: Ta
             .map((tag) => (
               <Badge
                 key={tag}
-                className={`${isCompact ? "px-1 py-0 text-[9px]" : "px-1.5 py-0 text-[10px]"} border-slate-500/35 bg-slate-500/15 text-slate-300`}
+                className={`${isCompact ? "px-1 py-0 text-[9px]" : "px-1.5 py-0 text-[10px]"} border-slate-500/35 bg-slate-500/15 text-slate-600 dark:text-slate-300`}
               >
                 {tag}
               </Badge>

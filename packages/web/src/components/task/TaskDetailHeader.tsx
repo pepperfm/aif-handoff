@@ -94,7 +94,7 @@ export function TaskDetailHeader({
             </Badge>
           )}
           {task.roadmapAlias && (
-            <Badge className="text-[10px] border-violet-500/35 bg-violet-500/15 text-violet-300">
+            <Badge className="text-[10px] border-violet-500/35 bg-violet-500/15 text-violet-600 dark:text-violet-300">
               {task.roadmapAlias}
             </Badge>
           )}
@@ -103,7 +103,7 @@ export function TaskDetailHeader({
             .map((tag) => (
               <Badge
                 key={tag}
-                className="text-[10px] border-slate-500/35 bg-slate-500/15 text-slate-300"
+                className="text-[10px] border-slate-500/35 bg-slate-500/15 text-slate-600 dark:text-slate-300"
               >
                 {tag}
               </Badge>

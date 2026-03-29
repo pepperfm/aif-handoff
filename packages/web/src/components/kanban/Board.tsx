@@ -203,7 +203,7 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
       <div
         className={`mb-4 flex flex-wrap items-center gap-2 border border-border bg-card/45 ${isCompact ? "px-2 py-1.5" : "px-3 py-2"}`}
       >
-        <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="min-w-12 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Filters
         </span>
         {(Object.keys(FILTER_LABELS) as QuickFilter[]).map((key) => {
@@ -243,9 +243,9 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
       {activeFilters.includes("roadmap") && roadmapAliases.length > 0 && (
         <div
           data-testid="roadmap-alias-filters"
-          className={`-mt-2 mb-4 flex flex-wrap items-center gap-2 border border-t-0 border-border bg-card/35 ${isCompact ? "px-2 py-1.5" : "px-3 py-2"}`}
+          className={`-mt-2 mb-4 flex flex-wrap items-center gap-2 border border-border bg-card/35 ${isCompact ? "px-2 py-1.5" : "px-3 py-2"}`}
         >
-          <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+          <span className="min-w-12 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
             Roadmap
           </span>
           {roadmapAliases.map((alias) => {
@@ -267,16 +267,6 @@ export function Board({ projectId, onTaskClick, density, viewMode = "kanban" }: 
               </button>
             );
           })}
-          {activeRoadmapAliases.length > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-[11px]"
-              onClick={() => setActiveRoadmapAliases([])}
-            >
-              all roadmaps
-            </Button>
-          )}
         </div>
       )}
 

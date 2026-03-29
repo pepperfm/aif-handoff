@@ -141,8 +141,21 @@ describe("runPlanner comment selection", () => {
         projectId: "project-1",
         title: "Fix login bug",
         description: "Users get 500 on /login",
+        attachments:
+          '[{"name":"error-log.txt","mimeType":"text/plain","size":12,"path":"tasks/task-fix-1/error-log.txt"}]',
         status: "planning",
         isFix: true,
+      })
+      .run();
+    db.insert(taskComments)
+      .values({
+        id: "c-fix-latest",
+        taskId: "task-fix-1",
+        author: "human",
+        message: "Please include retry and preserve session tokens",
+        attachments:
+          '[{"name":"request.txt","mimeType":"text/plain","size":10,"path":"tasks/task-fix-1/comments/c-fix-latest/request.txt"}]',
+        createdAt: "2026-01-01T00:00:10.000Z",
       })
       .run();
 
@@ -156,6 +169,11 @@ describe("runPlanner comment selection", () => {
     expect(call.prompt).toContain("/aif-fix --plan-first");
     expect(call.prompt).toContain("Fix login bug");
     expect(call.prompt).toContain("Users get 500 on /login");
+    expect(call.prompt).toContain("Task attachments:");
+    expect(call.prompt).toContain("error-log.txt");
+    expect(call.prompt).toContain("User comments and replanning feedback:");
+    expect(call.prompt).toContain("message: Please include retry and preserve session tokens");
+    expect(call.prompt).toContain("request.txt");
     expect(call.options.extraArgs).toBeUndefined();
   });
 

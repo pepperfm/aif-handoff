@@ -108,11 +108,8 @@ function formatCommentsForPrompt(
     .join("\n\n");
 }
 
-function buildFixCommandText(title: string, description: string): string {
-  const normalizedDescription = description.trim();
-  const taskText =
-    normalizedDescription.length > 0 ? `${title.trim()}\n\n${normalizedDescription}` : title.trim();
-  return `/aif-fix --plan-first ${JSON.stringify(taskText)}`;
+function buildFixCommandText(taskContext: string): string {
+  return `/aif-fix --plan-first ${JSON.stringify(taskContext)}`;
 }
 
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
@@ -147,7 +144,7 @@ User comments and replanning feedback:
 ${commentsForPrompt}`;
   let prompt: string;
   if (task.isFix) {
-    prompt = buildFixCommandText(task.title, task.description);
+    prompt = buildFixCommandText(taskContext);
   } else if (useSubagents) {
     prompt = `Plan the implementation for the following task.
 Mode: ${plannerMode}, tests: ${planTests}, docs: ${planDocs}.
