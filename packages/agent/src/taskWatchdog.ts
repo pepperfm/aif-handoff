@@ -18,7 +18,6 @@ export function getRandomBackoffMinutes(): number {
 }
 
 function getResumeStatusForStaleTask(status: TaskStatus): TaskStatus {
-  if (status === "implementing") return "plan_ready";
   return status;
 }
 

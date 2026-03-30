@@ -278,7 +278,7 @@ describe("coordinator", () => {
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-stale-impl")).get();
     expect(task!.status).toBe("blocked_external");
-    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.blockedFromStatus).toBe("implementing");
     expect(task!.blockedReason).toContain("Watchdog: task stale in implementing");
     expect(task!.retryAfter).toBeTruthy();
     expect(task!.retryCount).toBe(1);
@@ -326,7 +326,7 @@ describe("coordinator", () => {
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-stale-limit")).get();
     expect(task!.status).toBe("blocked_external");
-    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.blockedFromStatus).toBe("implementing");
     expect(task!.blockedReason).toContain("auto-retry limit reached");
     expect(task!.retryAfter).toBeNull();
     expect(task!.retryCount).toBe(3);
@@ -432,7 +432,7 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-5")).get();
-    expect(task!.status).toBe("plan_ready");
+    expect(task!.status).toBe("implementing");
   });
 
   it("should move task to blocked_external when implementer is blocked by permissions", async () => {
@@ -454,7 +454,7 @@ describe("coordinator", () => {
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-impl-perm")).get();
     expect(task!.status).toBe("blocked_external");
-    expect(task!.blockedFromStatus).toBe("plan_ready");
+    expect(task!.blockedFromStatus).toBe("implementing");
     expect(task!.retryAfter).toBeTruthy();
   });
 
@@ -476,7 +476,7 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-impl-stream")).get();
-    expect(task!.status).toBe("plan_ready");
+    expect(task!.status).toBe("implementing");
     expect(task!.blockedFromStatus).toBeNull();
     expect(task!.retryAfter).toBeNull();
     expect(task!.blockedReason).toBeNull();
@@ -501,7 +501,7 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     const task = db.select().from(tasks).where(eq(tasks.id, "task-impl-checklist")).get();
-    expect(task!.status).toBe("plan_ready");
+    expect(task!.status).toBe("implementing");
     expect(task!.blockedReason).toBeNull();
     expect(task!.retryAfter).toBeNull();
   });

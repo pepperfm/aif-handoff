@@ -195,7 +195,7 @@ describe("recoverStaleInProgressTasks", () => {
 
     const task = db.select().from(tasks).where(eq(tasks.id, id)).get();
     expect(task?.status).toBe("blocked_external");
-    expect(task?.blockedFromStatus).toBe("plan_ready"); // implementing resumes from plan_ready
+    expect(task?.blockedFromStatus).toBe("implementing");
     expect(task?.retryAfter).toBeNull();
     expect(task?.blockedReason).toContain("auto-retry limit reached");
   });

@@ -229,7 +229,7 @@ export async function pollAndProcess(): Promise<void> {
             },
             "Fast retry scheduled after transient stream interruption",
           );
-          updateTaskStatus(task.id, sourceStatus, {
+          updateTaskStatus(task.id, stage.inProgress, {
             blockedReason: null,
             blockedFromStatus: null,
             retryAfter: null,
@@ -239,14 +239,14 @@ export async function pollAndProcess(): Promise<void> {
         case "blocked_external":
           updateTaskStatus(task.id, "blocked_external", {
             blockedReason: err instanceof Error ? err.message : String(err),
-            blockedFromStatus: sourceStatus,
+            blockedFromStatus: stage.inProgress,
             retryAfter: recovery.retryAfter,
             retryCount: recovery.retryCount,
           });
           break;
 
         case "revert":
-          updateTaskStatus(task.id, sourceStatus);
+          updateTaskStatus(task.id, stage.inProgress);
           break;
       }
 
