@@ -159,11 +159,14 @@ export function ChatPanel({ isOpen, projectId, onClose }: ChatPanelProps) {
       <div className="flex-1 overflow-y-auto py-2">
         {chatErrorCode === "CHAT_USAGE_LIMIT" && (
           <div className="px-3 pb-2">
-            <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2">
-              <Badge variant="outline" className="border-amber-400/50 text-amber-300">
+            <div className="rounded border border-amber-500/50 bg-amber-500/15 p-2">
+              <Badge
+                variant="outline"
+                className="border-amber-600/60 text-amber-700 dark:border-amber-400/50 dark:text-amber-300"
+              >
                 Usage Limit Reached
               </Badge>
-              <p className="mt-1 text-xs text-amber-200/90">
+              <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/90">
                 Claude usage limit is currently exhausted. Wait for reset time and send again.
               </p>
             </div>
