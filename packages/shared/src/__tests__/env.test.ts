@@ -34,10 +34,10 @@ describe("env validation", () => {
     expect(result.ANTHROPIC_API_KEY).toBeUndefined();
     expect(result.PORT).toBe(3009);
     expect(result.POLL_INTERVAL_MS).toBe(30000);
-    expect(result.AGENT_STAGE_STALE_TIMEOUT_MS).toBe(20 * 60 * 1000);
+    expect(result.AGENT_STAGE_STALE_TIMEOUT_MS).toBe(90 * 60 * 1000);
     expect(result.AGENT_STAGE_STALE_MAX_RETRY).toBe(3);
-    expect(result.AGENT_STAGE_RUN_TIMEOUT_MS).toBe(15 * 60 * 1000);
-    expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(45 * 1000);
+    expect(result.AGENT_STAGE_RUN_TIMEOUT_MS).toBe(60 * 60 * 1000);
+    expect(result.AGENT_QUERY_START_TIMEOUT_MS).toBe(60 * 1000);
     expect(result.AGENT_QUERY_START_RETRY_DELAY_MS).toBe(1000);
     expect(result.DATABASE_URL).toBe("./data/aif.sqlite");
     expect(result.AGENT_QUERY_AUDIT_ENABLED).toBe(true);

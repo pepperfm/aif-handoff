@@ -48,9 +48,9 @@ cp .env.example .env
 | `PORT`                         | `3009`              | API server port                                                                               |
 | `WEB_PORT`                     | `5180`              | Web UI dev server port                                                                        |
 | `POLL_INTERVAL_MS`             | `30000`             | Agent coordinator polling interval (ms)                                                       |
-| `AGENT_STAGE_STALE_TIMEOUT_MS` | `1200000`           | Stale-stage watchdog timeout (ms) before auto-recovery                                        |
+| `AGENT_STAGE_STALE_TIMEOUT_MS` | `5400000`           | Stale-stage watchdog timeout (ms) before auto-recovery                                        |
 | `AGENT_STAGE_STALE_MAX_RETRY`  | `3`                 | Max stale auto-recover attempts before quarantine in `blocked_external`                       |
-| `AGENT_STAGE_RUN_TIMEOUT_MS`   | `900000`            | Per-stage timeout (ms) before coordinator marks run as failed                                 |
+| `AGENT_STAGE_RUN_TIMEOUT_MS`   | `3600000`           | Per-stage timeout (ms) before coordinator marks run as failed                                 |
 | `AGENT_USE_SUBAGENTS`          | `true`              | Default for per-task "Use subagents" toggle. `true`: custom subagents, `false`: aif-\* skills |
 | `DATABASE_URL`                 | `./data/aif.sqlite` | SQLite database path                                                                          |
 | `AGENT_QUERY_AUDIT_ENABLED`    | `true`              | Enable/disable query audit logs in `logs/*.log`                                               |

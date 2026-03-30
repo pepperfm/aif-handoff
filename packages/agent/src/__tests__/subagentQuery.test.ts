@@ -42,10 +42,10 @@ vi.mock("@aif/shared", async (importOriginal) => {
     getEnv: () => ({
       PORT: 3009,
       POLL_INTERVAL_MS: 30000,
-      AGENT_STAGE_STALE_TIMEOUT_MS: 20 * 60 * 1000,
+      AGENT_STAGE_STALE_TIMEOUT_MS: 90 * 60 * 1000,
       AGENT_STAGE_STALE_MAX_RETRY: 3,
-      AGENT_STAGE_RUN_TIMEOUT_MS: 15 * 60 * 1000,
-      AGENT_QUERY_START_TIMEOUT_MS: 45 * 1000,
+      AGENT_STAGE_RUN_TIMEOUT_MS: 60 * 60 * 1000,
+      AGENT_QUERY_START_TIMEOUT_MS: 60 * 1000,
       AGENT_QUERY_START_RETRY_DELAY_MS: 1000,
       DATABASE_URL: "./data/aif.sqlite",
       CORS_ORIGIN: "*",
