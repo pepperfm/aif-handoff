@@ -1,5 +1,6 @@
-import { Download } from "lucide-react";
+import { Bot, Download, User } from "lucide-react";
 import { useTaskComments } from "@/hooks/useTasks";
+import { Markdown } from "@/components/ui/markdown";
 
 interface TaskCommentsProps {
   taskId: string;
@@ -24,13 +25,31 @@ export function TaskComments({ taskId }: TaskCommentsProps) {
 
   return (
     <div className="space-y-3">
-      {comments.map((comment) => (
-        <div key={comment.id} className="border border-border bg-secondary/35 p-3">
+      {[...comments].reverse().map((comment) => (
+        <div
+          key={comment.id}
+          className={`border p-3 ${
+            comment.author === "human"
+              ? "border-blue-500/30 bg-blue-500/5"
+              : "border-violet-500/30 bg-violet-500/5"
+          }`}
+        >
           <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>{comment.author}</span>
+            <span
+              className={`flex items-center gap-1.5 ${
+                comment.author === "human" ? "text-blue-400" : "text-violet-400"
+              }`}
+            >
+              {comment.author === "human" ? (
+                <User className="h-3.5 w-3.5" />
+              ) : (
+                <Bot className="h-3.5 w-3.5" />
+              )}
+              {comment.author === "human" ? "Human" : "Agent"}
+            </span>
             <span>{formatWhen(comment.createdAt)}</span>
           </div>
-          <p className="whitespace-pre-wrap text-sm text-foreground/90">{comment.message}</p>
+          <Markdown content={comment.message} className="text-sm text-foreground/90" />
           {comment.attachments.length > 0 && (
             <div className="mt-3 border-t border-border pt-2">
               <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">

@@ -6,8 +6,8 @@ export function formatUsd(value: number | undefined): string {
   return Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value ?? 0);
 }
 
