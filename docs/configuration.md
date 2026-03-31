@@ -36,6 +36,8 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `AGENT_WAKE_ENABLED`               | boolean | `true`              | Enable event-driven coordinator wake via API WebSocket; set to `false` for polling-only mode                                                                                                                                                                            |
 | `AGENT_BYPASS_PERMISSIONS`         | boolean | `true`              | Bypass all Claude permission checks for subagents. When `false`, configure permissions via `.claude/settings.json` allow rules                                                                                                                                          |
 | `AGENT_USE_SUBAGENTS`              | boolean | `true`              | Default for the per-task "Use subagents" setting. Each task can override this in Planner settings. `true`: custom agents (`plan-coordinator`, `implement-coordinator`, sidecars). `false`: `aif-plan`, `aif-implement`, `aif-review`, `aif-security-checklist` directly |
+| `TELEGRAM_BOT_TOKEN`               | string  | _(optional)_        | Telegram bot token for task status notifications (see [Telegram Notifications](#telegram-notifications))                                                                                                                                                                |
+| `TELEGRAM_USER_ID`                 | string  | _(optional)_        | Telegram user ID to receive notifications                                                                                                                                                                                                                               |
 
 Environment validation is handled by Zod in `packages/shared/src/env.ts`. The application will fail to start with a descriptive error if required variables are invalid.
 
@@ -173,6 +175,24 @@ Agent budgets are configured per project (API or Project edit dialog):
 - `reviewSidecarMaxBudgetUsd` (applies to each review/security sidecar)
 
 If any of these values are not set, that agent runs without SDK budget limit.
+
+## Telegram Notifications
+
+Best-effort Telegram messages on task status changes. Add to `.env`:
+
+```
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_USER_ID=987654321
+```
+
+| Variable             | Type   | Default      | Description                                                        |
+| -------------------- | ------ | ------------ | ------------------------------------------------------------------ |
+| `TELEGRAM_BOT_TOKEN` | string | _(optional)_ | Bot token from [@BotFather](https://t.me/BotFather)                |
+| `TELEGRAM_USER_ID`   | string | _(optional)_ | Your Telegram user ID (the bot sends direct messages to this user) |
+
+When both variables are set, every `task:moved` event sends a short message with the task title and status transition. If delivery fails (network error, invalid token, etc.), nothing breaks — failures are logged at `debug` level and silently ignored.
+
+To get your user ID, message [@userinfobot](https://t.me/userinfobot) or any similar bot on Telegram.
 
 ## See Also
 

@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bell, Moon, Sun, Command, ChartColumn, Map, Loader2, Settings, Check, X as XIcon } from "lucide-react";
+import {
+  Bell,
+  Moon,
+  Sun,
+  Command,
+  ChartColumn,
+  Map,
+  Loader2,
+  Settings,
+  Check,
+  X as XIcon,
+} from "lucide-react";
+import type { AifConfig } from "@/lib/api";
+import { ConfigEditor } from "@/components/settings/ConfigEditor";
 import { useTheme } from "@/hooks/useTheme";
 import {
   getDesktopNotificationPermission,
@@ -65,6 +78,9 @@ export function Header({
   const [mcpInstalled, setMcpInstalled] = useState<boolean | null>(null);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
+  const [configExists, setConfigExists] = useState<boolean | null>(null);
+  const [configData, setConfigData] = useState<AifConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
   const { settings, setSettings } = useNotificationSettings();
   const permission = getDesktopNotificationPermission();
   const isCompact = density === "compact";
@@ -246,13 +262,6 @@ export function Header({
           </div>
 
           <button
-            onClick={toggleTheme}
-            className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-foreground transition-colors hover:border-primary/70 hover:bg-accent"
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
-          <button
             onClick={() => {
               setRoadmapAlias("");
               setRoadmapVision("");
@@ -295,6 +304,23 @@ export function Header({
                 (res) => setMcpInstalled(res.installed),
                 () => setMcpInstalled(null),
               );
+              setConfigData(null);
+              api.getConfigStatus().then(
+                (res) => {
+                  setConfigExists(res.exists);
+                  if (res.exists) {
+                    setConfigLoading(true);
+                    api.getConfig().then(
+                      (r) => {
+                        setConfigData(r.config);
+                        setConfigLoading(false);
+                      },
+                      () => setConfigLoading(false),
+                    );
+                  }
+                },
+                () => setConfigExists(false),
+              );
             }}
             className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-foreground transition-colors hover:border-primary/70 hover:bg-accent"
             aria-label="Global settings"
@@ -307,6 +333,13 @@ export function Header({
             aria-label="Notification settings"
           >
             <Bell className="h-4 w-4" />
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-foreground transition-colors hover:border-primary/70 hover:bg-accent"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
         </div>
       </div>
@@ -528,7 +561,7 @@ export function Header({
         </DialogContent>
       </Dialog>
       <Dialog open={globalSettingsOpen} onOpenChange={setGlobalSettingsOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogClose onClose={() => setGlobalSettingsOpen(false)} />
           <DialogHeader>
             <DialogTitle>Global Settings</DialogTitle>
@@ -558,9 +591,7 @@ export function Header({
                     Not configured
                   </p>
                 )}
-                {mcpError && (
-                  <p className="text-xs text-destructive mt-1">{mcpError}</p>
-                )}
+                {mcpError && <p className="text-xs text-destructive mt-1">{mcpError}</p>}
               </div>
               <div>
                 {mcpInstalled === false && (
@@ -580,11 +611,7 @@ export function Header({
                     disabled={mcpLoading}
                     className="min-w-20 border border-border bg-background px-2 py-1 text-xs transition-colors hover:border-primary/70 disabled:opacity-40 flex items-center justify-center gap-1"
                   >
-                    {mcpLoading ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      "Install"
-                    )}
+                    {mcpLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Install"}
                   </button>
                 )}
                 {mcpInstalled === true && (
@@ -604,15 +631,25 @@ export function Header({
                     disabled={mcpLoading}
                     className="min-w-20 border border-border bg-background px-2 py-1 text-xs text-destructive transition-colors hover:border-destructive/70 disabled:opacity-40 flex items-center justify-center gap-1"
                   >
-                    {mcpLoading ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      "Remove"
-                    )}
+                    {mcpLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Remove"}
                   </button>
                 )}
               </div>
             </div>
+
+            {configExists && (
+              <div className="border border-border bg-card/50 px-3 py-2">
+                <p className="text-sm font-medium mb-0.5">AI Factory Config</p>
+                <p className="text-xs text-muted-foreground mb-3">.ai-factory/config.yaml</p>
+                {configLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                ) : configData ? (
+                  <ConfigEditor config={configData} onConfigChange={setConfigData} />
+                ) : null}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -49,7 +49,11 @@ export function releaseDueBlockedTasks(): void {
       lastHeartbeatAt: nowIso,
       updatedAt: nowIso,
     });
-    void notifyTaskBroadcast(task.id, "task:moved");
+    void notifyTaskBroadcast(task.id, "task:moved", {
+      title: task.title,
+      fromStatus: "blocked_external",
+      toStatus: task.blockedFromStatus,
+    });
     logActivity(
       task.id,
       "Agent",
@@ -94,7 +98,11 @@ export function recoverStaleInProgressTasks(): void {
         lastHeartbeatAt: nowIso,
         updatedAt: nowIso,
       });
-      void notifyTaskBroadcast(task.id, "task:moved");
+      void notifyTaskBroadcast(task.id, "task:moved", {
+        title: task.title,
+        fromStatus: task.status,
+        toStatus: "blocked_external",
+      });
       logActivity(
         task.id,
         "Agent",
@@ -119,7 +127,11 @@ export function recoverStaleInProgressTasks(): void {
       lastHeartbeatAt: nowIso,
       updatedAt: nowIso,
     });
-    void notifyTaskBroadcast(task.id, "task:moved");
+    void notifyTaskBroadcast(task.id, "task:moved", {
+      title: task.title,
+      fromStatus: task.status,
+      toStatus: "blocked_external",
+    });
     logActivity(
       task.id,
       "Agent",

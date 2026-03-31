@@ -18,7 +18,7 @@ import { runPlanChecker } from "./subagents/planChecker.js";
 import { runImplementer } from "./subagents/implementer.js";
 import { runReviewer } from "./subagents/reviewer.js";
 import { flushActivityQueue } from "./hooks.js";
-import { notifyTaskBroadcast } from "./notifier.js";
+import { notifyTaskBroadcast, type TaskNotificationInfo } from "./notifier.js";
 import { handleAutoReviewGate } from "./autoReviewHandler.js";
 import { classifyStageError } from "./stageErrorHandler.js";
 import { releaseDueBlockedTasks, recoverStaleInProgressTasks } from "./taskWatchdog.js";
@@ -96,9 +96,10 @@ function updateTaskStatus(
   taskId: string,
   status: TaskStatus,
   extra: Omit<TaskFieldsPatch, "status" | "lastHeartbeatAt" | "updatedAt"> = {},
+  info: TaskNotificationInfo = {},
 ): void {
   updateTaskStatusRow(taskId, status, extra);
-  void notifyTaskBroadcast(taskId, "task:moved");
+  void notifyTaskBroadcast(taskId, "task:moved", { ...info, toStatus: status });
 }
 
 export async function pollAndProcess(): Promise<void> {
@@ -136,8 +137,9 @@ export async function pollAndProcess(): Promise<void> {
       "Picked up task for processing",
     );
     const sourceStatus = task.status;
+    const taskInfo = { title: task.title, fromStatus: sourceStatus };
 
-    updateTaskStatus(task.id, stage.inProgress);
+    updateTaskStatus(task.id, stage.inProgress, {}, taskInfo);
 
     log.debug(
       { taskId: task.id, from: sourceStatus, to: stage.inProgress },
@@ -151,7 +153,7 @@ export async function pollAndProcess(): Promise<void> {
 
       // Skip review: if task has skipReview, jump straight to done after implementing
       if (stage.label === "implementer" && task.skipReview) {
-        updateTaskStatus(task.id, "done", CLEAN_STATE_RESET);
+        updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, taskInfo);
         log.info(
           { taskId: task.id, from: stage.inProgress, to: "done" },
           "Skip review enabled — bypassing review stage",
@@ -167,7 +169,7 @@ export async function pollAndProcess(): Promise<void> {
         });
 
         if (outcome === "max_iterations_reached") {
-          updateTaskStatus(task.id, "done", CLEAN_STATE_RESET);
+          updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, taskInfo);
 
           log.info(
             { taskId: task.id, from: stage.inProgress, to: "done" },
@@ -178,11 +180,16 @@ export async function pollAndProcess(): Promise<void> {
 
         if (outcome === "rework_requested") {
           const currentCount = task.reviewIterationCount ?? 0;
-          updateTaskStatus(task.id, "implementing", {
-            ...CLEAN_STATE_RESET,
-            reworkRequested: true,
-            reviewIterationCount: currentCount + 1,
-          });
+          updateTaskStatus(
+            task.id,
+            "implementing",
+            {
+              ...CLEAN_STATE_RESET,
+              reworkRequested: true,
+              reviewIterationCount: currentCount + 1,
+            },
+            taskInfo,
+          );
 
           log.info(
             {
@@ -197,12 +204,18 @@ export async function pollAndProcess(): Promise<void> {
         }
       }
 
-      updateTaskStatus(task.id, stage.onSuccess, {
-        ...CLEAN_STATE_RESET,
-        // Preserve review iteration count when transitioning implementing → review
-        // so the auto review gate can enforce max iterations across rework cycles.
-        reviewIterationCount: stage.label === "implementer" ? (task.reviewIterationCount ?? 0) : 0,
-      });
+      updateTaskStatus(
+        task.id,
+        stage.onSuccess,
+        {
+          ...CLEAN_STATE_RESET,
+          // Preserve review iteration count when transitioning implementing → review
+          // so the auto review gate can enforce max iterations across rework cycles.
+          reviewIterationCount:
+            stage.label === "implementer" ? (task.reviewIterationCount ?? 0) : 0,
+        },
+        taskInfo,
+      );
 
       log.info(
         { taskId: task.id, from: stage.inProgress, to: stage.onSuccess },
@@ -229,24 +242,34 @@ export async function pollAndProcess(): Promise<void> {
             },
             "Fast retry scheduled after transient stream interruption",
           );
-          updateTaskStatus(task.id, stage.inProgress, {
-            blockedReason: null,
-            blockedFromStatus: null,
-            retryAfter: null,
-          });
+          updateTaskStatus(
+            task.id,
+            stage.inProgress,
+            {
+              blockedReason: null,
+              blockedFromStatus: null,
+              retryAfter: null,
+            },
+            taskInfo,
+          );
           break;
 
         case "blocked_external":
-          updateTaskStatus(task.id, "blocked_external", {
-            blockedReason: err instanceof Error ? err.message : String(err),
-            blockedFromStatus: stage.inProgress,
-            retryAfter: recovery.retryAfter,
-            retryCount: recovery.retryCount,
-          });
+          updateTaskStatus(
+            task.id,
+            "blocked_external",
+            {
+              blockedReason: err instanceof Error ? err.message : String(err),
+              blockedFromStatus: stage.inProgress,
+              retryAfter: recovery.retryAfter,
+              retryCount: recovery.retryCount,
+            },
+            taskInfo,
+          );
           break;
 
         case "revert":
-          updateTaskStatus(task.id, stage.inProgress);
+          updateTaskStatus(task.id, stage.inProgress, {}, taskInfo);
           break;
       }
 
