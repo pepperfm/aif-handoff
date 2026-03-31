@@ -125,7 +125,7 @@ async function runQueryAttempt(
       cwd: projectRoot,
       env: process.env,
       pathToClaudeCodeExecutable: getClaudePath(),
-      settingSources: [],
+      settingSources: ["project"],
       permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
       ...(bypassPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       systemPrompt: {
@@ -173,6 +173,30 @@ async function runQueryAttempt(
   }
 }
 
+async function runWithRetry(
+  options: SubagentQueryOptions,
+  queryStartTimeoutMs: number,
+  queryStartRetryDelayMs: number,
+  onStderr: (chunk: string) => void,
+  setResultText: (value: string) => void,
+): Promise<void> {
+  const { taskId, agentName } = options;
+
+  try {
+    await runQueryAttempt(options, queryStartTimeoutMs, onStderr, setResultText);
+  } catch (err) {
+    if (!isQueryStartTimeoutError(err)) throw err;
+
+    log.warn(
+      { taskId, agentName, attempt: 1, timeoutMs: queryStartTimeoutMs },
+      "query_start_timeout detected, retrying subagent query once",
+    );
+    logActivity(taskId, "Agent", `${agentName} query_start_timeout on attempt 1; retrying once`);
+    await sleep(queryStartRetryDelayMs);
+    await runQueryAttempt(options, queryStartTimeoutMs, onStderr, setResultText);
+  }
+}
+
 /**
  * Execute a Claude Agent SDK query with standardized:
  * - heartbeat timer
@@ -209,7 +233,7 @@ export async function executeSubagentQuery(
     projectRoot,
     prompt,
     options: {
-      settingSources: [],
+      settingSources: ["project"],
       maxBudgetUsd,
       systemPrompt: {
         type: "preset",
@@ -224,32 +248,13 @@ export async function executeSubagentQuery(
       resultText = value;
     };
 
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        await runQueryAttempt(
-          options,
-          queryStartTimeoutMs,
-          stderrCollector.onStderr,
-          applyResultText,
-        );
-        break;
-      } catch (err) {
-        const isRetryableStartTimeout = isQueryStartTimeoutError(err) && attempt === 1;
-        if (!isRetryableStartTimeout) {
-          throw err;
-        }
-        log.warn(
-          { taskId, agentName, attempt, timeoutMs: queryStartTimeoutMs },
-          "query_start_timeout detected, retrying subagent query once",
-        );
-        logActivity(
-          taskId,
-          "Agent",
-          `${agentName} query_start_timeout on attempt ${attempt}; retrying once`,
-        );
-        await sleep(queryStartRetryDelayMs);
-      }
-    }
+    await runWithRetry(
+      options,
+      queryStartTimeoutMs,
+      queryStartRetryDelayMs,
+      stderrCollector.onStderr,
+      applyResultText,
+    );
 
     logActivity(taskId, "Agent", `${agentName} complete`);
     return { resultText };

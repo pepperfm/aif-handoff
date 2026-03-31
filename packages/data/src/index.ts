@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, min, or, sql } from "drizzle-orm";
 import {
   parseAttachments,
   parseTaskTokenUsage,
@@ -148,7 +148,14 @@ export function createTask(input: {
       tags: JSON.stringify(input.tags ?? []),
       reworkRequested: false,
       status: "backlog",
-      position: 1000.0,
+      position: (() => {
+        const row = db
+          .select({ minPos: min(tasks.position) })
+          .from(tasks)
+          .where(eq(tasks.status, "backlog"))
+          .get();
+        return (row?.minPos != null ? Number(row.minPos) : 1000) - 100;
+      })(),
       lastHeartbeatAt: now,
       createdAt: now,
       updatedAt: now,
