@@ -72,8 +72,9 @@ export async function notifyTaskBroadcast(
     log.debug({ taskId, type, err }, "Task broadcast request failed");
   }
 
-  // Best-effort Telegram notification — fire and forget
-  if (type === "task:moved") {
+  // Best-effort Telegram notification — fire and forget.
+  // Skip when status didn't actually change (e.g. implementing → implementing).
+  if (type === "task:moved" && (!info.fromStatus || info.fromStatus !== info.toStatus)) {
     void sendTelegramNotification(taskId, info);
   }
 }

@@ -162,6 +162,27 @@ describe("notifyTaskBroadcast", () => {
       expect(body.text).toContain("updated");
     });
 
+    it("skips Telegram when fromStatus equals toStatus (no real change)", async () => {
+      vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:ABC");
+      vi.stubEnv("TELEGRAM_USER_ID", "999");
+
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      global.fetch = fetchMock as any;
+
+      await notifyTaskBroadcast("task-noop", "task:moved", {
+        title: "Same Status",
+        fromStatus: "implementing",
+        toStatus: "implementing",
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const telegramCall = fetchMock.mock.calls.find(
+        (call: any[]) => typeof call[0] === "string" && call[0].includes("api.telegram.org"),
+      );
+      expect(telegramCall).toBeUndefined();
+    });
+
     it("escapes MarkdownV2 special characters in title", async () => {
       vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:ABC");
       vi.stubEnv("TELEGRAM_USER_ID", "999");
