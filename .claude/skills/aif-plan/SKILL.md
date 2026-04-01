@@ -18,6 +18,7 @@ Create an implementation plan for a feature or task. Two modes:
 ### Step 0 (pre): Detect Handoff Mode
 
 Handoff mode: !`echo ${HANDOFF_MODE:-}`
+Handoff task ID: !`echo ${HANDOFF_TASK_ID:-}`
 
 **Then check `HANDOFF_MODE`:**
 
@@ -27,6 +28,7 @@ The Handoff coordinator already manages status transitions and DB writes directl
 
 - **No interactive questions:** Do not use `AskUserQuestion` — use sensible defaults (verbose logging, yes to tests, yes to docs, skip roadmap linkage).
 - **Mode default:** If mode is not specified, default to `fast`.
+- **Plan annotation:** If `HANDOFF_TASK_ID` is non-empty, insert `<!-- handoff:task:<HANDOFF_TASK_ID> -->` as the very first line of the plan file, before the title. This annotation links the plan to its Handoff task for bidirectional sync. **Omitting this annotation is a bug.**
 
 #### When `HANDOFF_MODE` is NOT `1` (manual Claude Code session)
 

@@ -186,10 +186,14 @@ export function Header({
     };
   }, [selectedProject, onRoadmapImportComplete]);
 
+  const anyDialogOpen = settingsOpen || metricsOpen || roadmapOpen || globalSettingsOpen;
+
   return (
-    <header className="sticky top-0 z-[60] border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+    <header
+      className={`sticky top-0 z-60 border-b border-border ${anyDialogOpen ? "bg-background" : "bg-background/90 backdrop-blur supports-backdrop-filter:bg-background/65"}`}
+    >
       <div
-        className={`mx-auto flex w-full max-w-[1680px] items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}
+        className={`mx-auto flex w-full max-w-420 items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}
       >
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold tracking-tight text-primary">&gt;</span>
@@ -263,6 +267,10 @@ export function Header({
 
           <button
             onClick={() => {
+              if (roadmapOpen) {
+                setRoadmapOpen(false);
+                return;
+              }
               setRoadmapAlias("");
               setRoadmapVision("");
               setRoadmapError(null);
@@ -286,7 +294,7 @@ export function Header({
             <span className="hidden md:inline">ROADMAP</span>
           </button>
           <button
-            onClick={() => setMetricsOpen(true)}
+            onClick={() => setMetricsOpen((v) => !v)}
             className="inline-flex h-8 items-center gap-1 border border-border bg-card px-2 text-[10px] font-mono text-foreground transition-colors hover:border-primary/70 hover:bg-accent"
             aria-label="Task metrics"
             type="button"
@@ -296,6 +304,10 @@ export function Header({
           </button>
           <button
             onClick={() => {
+              if (globalSettingsOpen) {
+                setGlobalSettingsOpen(false);
+                return;
+              }
               setGlobalSettingsOpen(true);
               setMcpError(null);
               setMcpInstalled(null);
@@ -328,7 +340,7 @@ export function Header({
             <Settings className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => setSettingsOpen((v) => !v)}
             className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-foreground transition-colors hover:border-primary/70 hover:bg-accent"
             aria-label="Notification settings"
           >

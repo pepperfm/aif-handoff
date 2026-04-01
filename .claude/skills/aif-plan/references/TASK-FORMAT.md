@@ -3,23 +3,31 @@
 ## Plan File Template
 
 ```markdown
+<!-- handoff:task:<HANDOFF_TASK_ID> -->
+<!-- ↑ First line: only when HANDOFF_MODE=1 and HANDOFF_TASK_ID is non-empty -->
+
 # Implementation Plan: [Feature Name]
 
 Branch: [current branch or "none"]
 Created: [date]
 
 ## Settings
+
 - Testing: yes/no
 - Logging: verbose/standard/minimal
-- Docs: yes/no  # yes => mandatory docs checkpoint in /aif-implement, no/unset => WARN [docs] only
+- Docs: yes/no # yes => mandatory docs checkpoint in /aif-implement, no/unset => WARN [docs] only
 
 ## Roadmap Linkage (optional)
+
 <!-- Only when .ai-factory/ROADMAP.md exists -->
-Milestone: "[milestone name from ROADMAP.md]"  # or "none"
+
+Milestone: "[milestone name from ROADMAP.md]" # or "none"
 Rationale: [1 short sentence]
 
 ## Research Context (optional)
+
 <!-- If .ai-factory/RESEARCH.md exists, copy/paste the Active Summary here -->
+
 Source: .ai-factory/RESEARCH.md (Active Summary)
 
 Goal:
@@ -28,22 +36,27 @@ Decisions:
 Open questions:
 
 ## Commit Plan
+
 <!-- For plans with 5+ tasks, define commit checkpoints -->
+
 - **Commit 1** (after tasks 1-3): "feat: add base models and types"
 - **Commit 2** (after tasks 4-6): "feat: implement core service logic"
 
 ## Tasks
 
 ### Phase 1: Setup
+
 - [ ] Task 1: [description]
 - [ ] Task 2: [description]
 
 ### Phase 2: Core Implementation
+
 - [ ] Task 3: [description] (depends on 1, 2)
 - [ ] Task 4: [description]
 <!-- Commit checkpoint: tasks 1-4 -->
 
 ### Phase 3: Integration
+
 - [ ] Task 5: [description] (depends on 3, 4)
 <!-- Commit checkpoint: tasks 5+ -->
 ```
@@ -75,6 +88,7 @@ TaskCreate:
 ## Logging Requirements Checklist
 
 Every task description should specify:
+
 - What to log: inputs, outputs, state changes, errors
 - Where to log: key checkpoints and external boundaries
 - Levels: DEBUG for verbose flow, INFO for major events, ERROR for failures
