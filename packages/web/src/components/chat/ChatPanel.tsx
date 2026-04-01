@@ -208,12 +208,12 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose }: ChatPanelProps
     <div
       ref={panelRef}
       className={cn(
-        "fixed bottom-0 left-0 z-[60] flex h-[calc(100vh-3.5rem)] w-[800px] flex-col",
-        "border-r border-border bg-background shadow-xl",
+        "fixed bottom-0 left-0 z-[55] flex h-[calc(100vh-4rem)] w-[800px] flex-col",
+        "border-r border-border bg-background/90 backdrop-blur shadow-xl supports-[backdrop-filter]:bg-background/65",
         "transition-transform duration-300 ease-in-out",
         isOpen ? "translate-x-0" : "-translate-x-full",
       )}
-      style={{ top: "3.5rem" }}
+      style={{ top: "4rem" }}
     >
       {/* Header */}
       <div className="border-b border-border px-4 py-3">
@@ -321,7 +321,7 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose }: ChatPanelProps
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
             className={cn(
-              "flex h-9 w-9 items-center justify-center rounded",
+              "flex w-9 items-center justify-center self-stretch rounded",
               "bg-primary text-primary-foreground",
               "transition-colors hover:bg-primary/90",
               "disabled:opacity-40 disabled:cursor-not-allowed",

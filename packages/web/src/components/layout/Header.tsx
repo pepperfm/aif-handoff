@@ -187,7 +187,7 @@ export function Header({
   }, [selectedProject, onRoadmapImportComplete]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+    <header className="sticky top-0 z-[60] border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/65">
       <div
         className={`mx-auto flex w-full max-w-[1680px] items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}
       >
