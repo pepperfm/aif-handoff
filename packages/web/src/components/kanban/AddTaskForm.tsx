@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Plus, X, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateTask } from "@/hooks/useTasks";
 import { api } from "@/lib/api";
+import { generatePlanPath } from "@aif/shared/browser";
 
 interface Props {
   projectId: string;
@@ -21,6 +22,7 @@ export function AddTaskForm({ projectId }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [plannerMode, setPlannerMode] = useState<"full" | "fast">("fast");
   const [defaultPlanPath, setDefaultPlanPath] = useState(DEFAULT_PLAN_PATH);
+  const [plansDir, setPlansDir] = useState(".ai-factory/plans/");
   const [planPath, setPlanPath] = useState(DEFAULT_PLAN_PATH);
   const [planDocs, setPlanDocs] = useState(false);
   const [planTests, setPlanTests] = useState(false);
@@ -30,6 +32,10 @@ export function AddTaskForm({ projectId }: Props) {
   const [maxReviewIterationsDefault, setMaxReviewIterationsDefault] = useState(3);
   const [maxReviewIterations, setMaxReviewIterations] = useState(3);
   const createTask = useCreateTask();
+
+  // Track whether the user has manually edited the plan path field.
+  // When true, the auto-set effect will not overwrite their edit.
+  const userOverride = useRef(false);
 
   // Listen for global task:create event (Ctrl+N)
   useEffect(() => {
@@ -79,11 +85,38 @@ export function AddTaskForm({ projectId }: Props) {
           setDefaultPlanPath(d.paths.plan);
           setPlanPath(d.paths.plan);
         }
+        if (d.paths?.plans) {
+          setPlansDir(d.paths.plans);
+        }
       })
       .catch(() => {
         // keep hardcoded defaults when config.yaml absent
       });
   }, [projectId]);
+
+  // Auto-update planPath when title or mode changes (unless user manually edited the field).
+  // Called from onChange handlers rather than useEffect to avoid cascading renders.
+  const syncPlanPath = (nextTitle: string, nextMode: "full" | "fast") => {
+    if (userOverride.current) return;
+    const path = generatePlanPath(nextTitle.trim(), nextMode, {
+      plansDir,
+      defaultPlanPath,
+    });
+    setPlanPath(path);
+    if (nextTitle.trim()) {
+      console.debug("[kanban] Auto-set plan path:", path);
+    }
+  };
+
+  const handleTitleChange = (value: string) => {
+    setTitle(value);
+    syncPlanPath(value, plannerMode);
+  };
+
+  const handleModeChange = (mode: "full" | "fast") => {
+    setPlannerMode(mode);
+    syncPlanPath(title, mode);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,6 +152,7 @@ export function AddTaskForm({ projectId }: Props) {
           setSkipReview(false);
           setUseSubagents(useSubagentsDefault);
           setMaxReviewIterations(maxReviewIterationsDefault);
+          userOverride.current = false;
           setIsOpen(false);
         },
         onError: (error) => {
@@ -149,7 +183,7 @@ export function AddTaskForm({ projectId }: Props) {
       <Input
         placeholder="Task title"
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        onChange={(e) => handleTitleChange(e.target.value)}
         autoFocus
       />
       <Textarea
@@ -232,7 +266,7 @@ export function AddTaskForm({ projectId }: Props) {
                       type="radio"
                       name="plannerMode"
                       checked={plannerMode === "full"}
-                      onChange={() => setPlannerMode("full")}
+                      onChange={() => handleModeChange("full")}
                       className="h-3.5 w-3.5 accent-[var(--color-primary)]"
                     />
                     <span className="font-medium text-foreground">Full</span>
@@ -242,7 +276,7 @@ export function AddTaskForm({ projectId }: Props) {
                       type="radio"
                       name="plannerMode"
                       checked={plannerMode === "fast"}
-                      onChange={() => setPlannerMode("fast")}
+                      onChange={() => handleModeChange("fast")}
                       className="h-3.5 w-3.5 accent-[var(--color-primary)]"
                     />
                     <span className="font-medium text-foreground">Fast</span>
@@ -255,10 +289,16 @@ export function AddTaskForm({ projectId }: Props) {
                 </p>
                 <Input
                   value={planPath}
-                  onChange={(e) => setPlanPath(e.target.value)}
+                  onChange={(e) => {
+                    userOverride.current = true;
+                    setPlanPath(e.target.value);
+                  }}
                   placeholder={defaultPlanPath}
                   className="h-7 text-xs"
                 />
+                <p className="text-[10px] text-muted-foreground/70">
+                  Preview — server may adjust based on project config
+                </p>
               </div>
               <div className="flex gap-4">
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -334,6 +374,7 @@ export function AddTaskForm({ projectId }: Props) {
             setSkipReview(false);
             setUseSubagents(useSubagentsDefault);
             setMaxReviewIterations(maxReviewIterationsDefault);
+            userOverride.current = false;
           }}
         >
           <X className="h-4 w-4" />

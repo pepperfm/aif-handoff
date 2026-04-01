@@ -38,6 +38,9 @@ logs/
 # Testing
 coverage/
 
+# Astro (generated)
+.astro/
+
 # Vite
 *.local
 

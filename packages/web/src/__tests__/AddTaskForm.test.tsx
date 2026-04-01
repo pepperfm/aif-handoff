@@ -147,6 +147,38 @@ describe("AddTaskForm", () => {
     expect(planInput).toBeDefined();
   });
 
+  it("loads plansDir from project config and uses it in full mode slug", async () => {
+    mockApi.getProjectDefaults.mockResolvedValueOnce({
+      paths: { plan: "custom/PLAN.md", plans: "custom/plans/" },
+      workflow: {},
+    });
+    mockApi.getSettings.mockResolvedValueOnce({
+      useSubagents: true,
+      maxReviewIterations: 3,
+    });
+
+    render(<AddTaskForm projectId="p-1" />);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Planner settings" }));
+    fireEvent.click(screen.getByLabelText("Full"));
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "My feature" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(mutateCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planPath: "custom/plans/my-feature.md",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("keeps default plan path when config has no plan path", async () => {
     mockApi.getProjectDefaults.mockResolvedValueOnce({
       paths: {},

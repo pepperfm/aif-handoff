@@ -55,7 +55,13 @@ export { findMonorepoRoot, findMonorepoRootFromUrl } from "./monorepoRoot.js";
 
 // Project initialization
 export { initProjectDirectory } from "./projectInit.js";
-export { getCanonicalPlanPath, syncPlanTextToCanonicalFile } from "./planFile.js";
+export {
+  slugify,
+  generatePlanPath,
+  getCanonicalPlanPath,
+  syncPlanTextToCanonicalFile,
+} from "./planFile.js";
+export type { GeneratePlanPathOptions } from "./planFile.js";
 export { persistTaskPlan } from "./taskPlan.js";
 
 // Path validation

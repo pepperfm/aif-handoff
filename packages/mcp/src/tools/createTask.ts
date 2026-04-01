@@ -3,7 +3,7 @@ import { z } from "zod";
 import { logger } from "@aif/shared";
 import { createTask, findProjectById, toTaskResponse } from "@aif/data";
 import type { ToolContext } from "./index.js";
-import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
+import { rateLimitError, validationError } from "../middleware/errorHandler.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { compactTaskResponse } from "../utils/compactResponse.js";
 
@@ -31,65 +31,66 @@ export function register(server: McpServer, context: ToolContext): void {
       planDocs: z.boolean().optional().describe("Include documentation in plan"),
       planTests: z.boolean().optional().describe("Include tests in plan"),
       skipReview: z.boolean().optional().describe("Skip review stage"),
+      planPath: z
+        .string()
+        .optional()
+        .describe("Plan file path (auto-generated for full mode if omitted)"),
       useSubagents: z.boolean().optional().describe("Use subagents for implementation"),
       maxReviewIterations: z.number().int().min(1).optional().describe("Maximum review iterations"),
       paused: z.boolean().optional().describe("Create task in paused state"),
     },
     async (args) => {
-      try {
-        if (!context.rateLimiter.check("handoff_create_task", "write")) {
-          throw rateLimitError("handoff_create_task");
-        }
-
-        log.debug({ args }, "handoff_create_task called");
-
-        // Validate project exists
-        const project = findProjectById(args.projectId);
-        if (!project) {
-          log.error({ projectId: args.projectId }, "Project not found for task creation");
-          throw validationError(`Project not found: ${args.projectId}`, {
-            projectId: ["Project does not exist"],
-          });
-        }
-
-        const row = createTask({
-          projectId: args.projectId,
-          title: args.title,
-          description: args.description ?? "",
-          priority: args.priority,
-          tags: args.tags,
-          plannerMode: args.plannerMode,
-          autoMode: args.autoMode,
-          isFix: args.isFix,
-          planDocs: args.planDocs,
-          planTests: args.planTests,
-          skipReview: args.skipReview,
-          useSubagents: args.useSubagents,
-          maxReviewIterations: args.maxReviewIterations,
-          paused: args.paused,
-        });
-
-        if (!row) {
-          log.error(
-            { projectId: args.projectId, title: args.title },
-            "Task creation returned undefined",
-          );
-          throw new McpError(ErrorCode.InternalError, "Failed to create task");
-        }
-
-        const full = toTaskResponse(row);
-
-        log.info(
-          { taskId: full.id, projectId: args.projectId, title: args.title },
-          "handoff_create_task completed",
-        );
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(compactTaskResponse(full)) }],
-        };
-      } catch (error) {
-        throw toMcpError(error);
+      if (!context.rateLimiter.check("handoff_create_task", "write")) {
+        throw rateLimitError("handoff_create_task");
       }
+
+      log.debug({ args }, "handoff_create_task called");
+
+      // Validate project exists
+      const project = findProjectById(args.projectId);
+      if (!project) {
+        log.error({ projectId: args.projectId }, "Project not found for task creation");
+        throw validationError(`Project not found: ${args.projectId}`, {
+          projectId: ["Project does not exist"],
+        });
+      }
+
+      const row = createTask({
+        projectId: args.projectId,
+        title: args.title,
+        description: args.description ?? "",
+        priority: args.priority,
+        tags: args.tags,
+        plannerMode: args.plannerMode,
+        autoMode: args.autoMode,
+        isFix: args.isFix,
+        planPath: args.planPath,
+        planDocs: args.planDocs,
+        planTests: args.planTests,
+        skipReview: args.skipReview,
+        useSubagents: args.useSubagents,
+        maxReviewIterations: args.maxReviewIterations,
+        paused: args.paused,
+      });
+
+      if (!row) {
+        log.error(
+          { projectId: args.projectId, title: args.title },
+          "Task creation returned undefined",
+        );
+        throw new McpError(ErrorCode.InternalError, "Failed to create task");
+      }
+
+      const full = toTaskResponse(row);
+
+      log.info(
+        { taskId: full.id, projectId: args.projectId, title: args.title },
+        "handoff_create_task completed",
+      );
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(compactTaskResponse(full)) }],
+      };
     },
   );
 }

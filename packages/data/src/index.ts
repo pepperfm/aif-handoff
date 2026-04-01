@@ -1,5 +1,8 @@
-import { and, asc, desc, eq, inArray, isNotNull, like, lte, min, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, like, lte, min, or, sql } from "drizzle-orm";
 import {
+  generatePlanPath,
+  getProjectConfig,
+  logger as createLogger,
   parseAttachments,
   parseTaskTokenUsage,
   persistTaskPlan,
@@ -10,6 +13,8 @@ import {
   type TaskStatus,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
+
+const log = createLogger("data");
 
 export type TaskRow = typeof tasks.$inferSelect;
 export type CommentRow = typeof taskComments.$inferSelect;
@@ -165,7 +170,7 @@ export function listTasksPaginated(options: {
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   const total = db
-    .select({ count: sql<number>`count(*)` })
+    .select({ count: count() })
     .from(tasks)
     .where(where)
     .get()?.count ?? 0;
@@ -204,7 +209,7 @@ export function searchTasksPaginated(options: {
   const where = and(...conditions);
 
   const total = db
-    .select({ count: sql<number>`count(*)` })
+    .select({ count: count() })
     .from(tasks)
     .where(where)
     .get()?.count ?? 0;
@@ -253,6 +258,23 @@ export function createTask(input: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
+  // Auto-compute planPath for full mode when no explicit path is provided
+  let resolvedPlanPath = input.planPath;
+  if (input.plannerMode === "full") {
+    const project = findProjectById(input.projectId);
+    const projectRoot = project?.rootPath ?? process.cwd();
+    const cfg = getProjectConfig(projectRoot);
+    const defaultPlanPath = cfg.paths.plan;
+
+    if (resolvedPlanPath === undefined || resolvedPlanPath === defaultPlanPath) {
+      resolvedPlanPath = generatePlanPath(input.title, "full", {
+        plansDir: cfg.paths.plans,
+        defaultPlanPath,
+      });
+      log.debug("Auto-generated plan path for full mode: %s", resolvedPlanPath);
+    }
+  }
+
   db.insert(tasks)
     .values({
       id,
@@ -264,7 +286,7 @@ export function createTask(input: {
       autoMode: input.autoMode,
       isFix: input.isFix,
       plannerMode: input.plannerMode,
-      planPath: input.planPath,
+      planPath: resolvedPlanPath,
       planDocs: input.planDocs,
       planTests: input.planTests,
       skipReview: input.skipReview,

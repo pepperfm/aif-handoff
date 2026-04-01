@@ -2,6 +2,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { getProjectConfig } from "./projectConfig.js";
 
+// Re-export browser-safe functions for backward compatibility
+export { slugify, generatePlanPath } from "./planPath.js";
+export type { GeneratePlanPathOptions } from "./planPath.js";
+
+// --- Node.js-dependent functions ---
+
 interface CanonicalPlanInput {
   projectRoot: string;
   isFix: boolean;
