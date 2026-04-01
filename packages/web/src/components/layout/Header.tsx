@@ -196,7 +196,7 @@ export function Header({
         className={`mx-auto flex w-full max-w-420 items-center ${isCompact ? "h-14 px-4 md:px-5" : "h-16 px-6 md:px-8"}`}
       >
         <div className="flex items-center gap-3">
-          <span className="text-xl font-bold tracking-tight text-primary">&gt;</span>
+          <img src="/logo.png" alt="Logo" className="h-6 w-auto object-contain" />
           <div className="h-5 w-px bg-border" />
           <ProjectSelector
             selectedId={selectedProject?.id ?? null}
