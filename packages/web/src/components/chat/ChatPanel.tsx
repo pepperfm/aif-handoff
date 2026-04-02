@@ -115,28 +115,30 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <>
-      <div className={cn("flex gap-2.5 px-3 py-2", isUser ? "flex-row-reverse" : "flex-row")}>
-        <div
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
-            isUser ? "bg-blue-600 text-white" : "bg-violet-600 text-white",
-          )}
-        >
-          {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
+      {displayContent.trim() && (
+        <div className={cn("flex gap-2.5 px-3 py-2", isUser ? "flex-row-reverse" : "flex-row")}>
+          <div
+            className={cn(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
+              isUser ? "bg-blue-600 text-white" : "bg-violet-600 text-white",
+            )}
+          >
+            {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
+          </div>
+          <div
+            className={cn(
+              "max-w-[85%] rounded-lg px-3 py-2 text-sm break-words",
+              isUser ? "bg-blue-600/15 text-foreground" : "bg-violet-600/15 text-foreground",
+            )}
+          >
+            {isUser ? (
+              <p className="whitespace-pre-wrap">{displayContent}</p>
+            ) : (
+              <Markdown content={displayContent} className="text-sm" />
+            )}
+          </div>
         </div>
-        <div
-          className={cn(
-            "max-w-[85%] rounded-lg px-3 py-2 text-sm break-words",
-            isUser ? "bg-blue-600/15 text-foreground" : "bg-violet-600/15 text-foreground",
-          )}
-        >
-          {isUser ? (
-            <p className="whitespace-pre-wrap">{displayContent}</p>
-          ) : (
-            <Markdown content={displayContent} className="text-sm" />
-          )}
-        </div>
-      </div>
+      )}
       {actions.map((action, i) =>
         action.type === "create_task" ? (
           <CreateTaskCard key={i} action={action} projectId={projectId} onCreated={onTaskCreated} />
