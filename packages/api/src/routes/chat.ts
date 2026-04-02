@@ -353,7 +353,7 @@ chatRouter.delete("/sessions/:id", async (c) => {
 // POST /chat
 chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => {
   const body = c.req.valid("json");
-  const { projectId, message, clientId, conversationId, explore, taskId } = body;
+  const { projectId, message, clientId, conversationId, explore, taskId, attachments } = body;
   let { sessionId: inputSessionId } = body;
 
   const project = findProjectById(projectId);
@@ -435,7 +435,22 @@ chatRouter.post("/", zValidator("json", chatRequestSchema as any), async (c) => 
   }
 
   try {
-    const prompt = explore ? `/aif-explore ${message}` : message;
+    // Build prompt with optional file attachments
+    let prompt = explore ? `/aif-explore ${message}` : message;
+    if (attachments?.length) {
+      const fileContext = attachments
+        .map(
+          (
+            f: { name: string; mimeType: string; size: number; content: string | null },
+            i: number,
+          ) => {
+            const preview = f.content ? f.content.slice(0, 4000) : "[binary file]";
+            return `File ${i + 1}: ${f.name} (${f.mimeType}, ${f.size} bytes)\n${preview}`;
+          },
+        )
+        .join("\n\n");
+      prompt = `${prompt}\n\n---\nAttached files:\n${fileContext}`;
+    }
 
     const stream = query({
       prompt,

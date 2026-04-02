@@ -265,6 +265,13 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  size: number;
+  content: string | null;
+}
+
 export interface ChatRequest {
   projectId: string;
   message: string;
@@ -274,6 +281,7 @@ export interface ChatRequest {
   explore?: boolean;
   /** Currently open task ID — provides context to the chat agent */
   taskId?: string;
+  attachments?: ChatAttachment[];
 }
 
 // ── Chat actions (structured blocks in AI responses) ───────

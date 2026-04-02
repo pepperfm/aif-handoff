@@ -109,6 +109,13 @@ export const updateChatSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
 });
 
+export const chatAttachmentSchema = z.object({
+  name: z.string().min(1).max(500),
+  mimeType: z.string().max(200),
+  size: z.number().int().min(0).max(10_000_000),
+  content: z.string().max(2_000_000).nullable(),
+});
+
 export const chatRequestSchema = z.object({
   projectId: z.string().min(1, "Project ID is required"),
   message: z.string().min(1, "Message is required").max(50_000),
@@ -117,4 +124,5 @@ export const chatRequestSchema = z.object({
   sessionId: z.string().optional(),
   explore: z.boolean().default(false),
   taskId: z.string().optional(),
+  attachments: z.array(chatAttachmentSchema).max(5).optional(),
 });

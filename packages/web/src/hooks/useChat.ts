@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type {
   ChatMessage,
+  ChatAttachment,
   ChatStreamTokenPayload,
   ChatDonePayload,
   ChatErrorPayload,
@@ -176,7 +177,7 @@ export function useChat(
   }, []);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachments?: ChatAttachment[]) => {
       if (!projectId || !text.trim() || isStreaming) return;
 
       const clientId = getWsClientId();
@@ -226,6 +227,7 @@ export function useChat(
           sessionId: effectiveSessionId ?? undefined,
           explore,
           ...(taskId ? { taskId } : {}),
+          ...(attachments?.length ? { attachments } : {}),
         });
 
         if (result.sessionId && !currentSessionIdRef.current) {

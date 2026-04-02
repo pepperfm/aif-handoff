@@ -82,7 +82,7 @@ describe("ChatPanel", () => {
     const textarea = screen.getByPlaceholderText("Ask a question...");
     fireEvent.change(textarea, { target: { value: "test message" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
-    expect(mockSendMessage).toHaveBeenCalledWith("test message");
+    expect(mockSendMessage).toHaveBeenCalledWith("test message", undefined);
   });
 
   it("does not send message on Shift+Enter", () => {
@@ -97,11 +97,11 @@ describe("ChatPanel", () => {
     render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
     const textarea = screen.getByPlaceholderText("Ask a question...");
     fireEvent.change(textarea, { target: { value: "hello" } });
-    // Click the send button (it's the button with Send icon in the input area)
+    // Click the send button (it's the button without a title in the input area)
     const buttons = screen.getAllByRole("button");
     const sendButton = buttons.find((btn) => !btn.hasAttribute("title"));
     if (sendButton) fireEvent.click(sendButton);
-    expect(mockSendMessage).toHaveBeenCalledWith("hello");
+    expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined);
   });
 
   it("shows Explore checkbox toggle", () => {

@@ -18,6 +18,7 @@ import {
   ClipboardList,
   PanelLeftClose,
   PanelLeftOpen,
+  Paperclip,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "@/components/ui/markdown";
@@ -26,8 +27,9 @@ import { useChat } from "@/hooks/useChat";
 import { useChatSessions } from "@/hooks/useChatSessions";
 import { useTask, useCreateTask } from "@/hooks/useTasks";
 import { parseChatActions } from "@/lib/chatActions";
+import { toAttachmentPayload } from "@/components/task/useTaskDetailActions";
 import { SessionList } from "./SessionList";
-import type { ChatMessage, ChatActionCreateTask } from "@aif/shared/browser";
+import type { ChatMessage, ChatAttachment, ChatActionCreateTask } from "@aif/shared/browser";
 
 interface ChatPanelProps {
   isOpen: boolean;
@@ -207,6 +209,8 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
 
   const { data: currentTask } = useTask(taskId);
   const [input, setInput] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const handleTaskCreated = useCallback(() => {
     // Task created via action card — react-query invalidation happens in useCreateTask
   }, []);
@@ -251,8 +255,24 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
   const handleSend = () => {
     if (!input.trim() || isStreaming) return;
     pinActiveSession();
-    void sendMessage(input);
+    const files = pendingFiles.length > 0 ? pendingFiles : undefined;
+    void sendMessage(input, files);
     setInput("");
+    setPendingFiles([]);
+  };
+
+  const handleFilesSelected = async (fileList: FileList) => {
+    const newFiles: ChatAttachment[] = [];
+    for (const file of Array.from(fileList).slice(0, 5 - pendingFiles.length)) {
+      const payload = await toAttachmentPayload(file);
+      newFiles.push({
+        name: payload.name,
+        mimeType: payload.mimeType,
+        size: payload.size,
+        content: payload.content,
+      });
+    }
+    setPendingFiles((prev) => [...prev, ...newFiles].slice(0, 5));
   };
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -431,7 +451,50 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
           />
           <span title="Brainstorm, research or explore a topic">Explore</span>
         </label>
+        {pendingFiles.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {pendingFiles.map((f, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1 rounded bg-secondary/80 px-2 py-0.5 text-xs text-muted-foreground"
+              >
+                <Paperclip className="h-3 w-3" />
+                {f.name}
+                <button
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="ml-0.5 hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) {
+                void handleFilesSelected(e.target.files);
+                e.target.value = "";
+              }
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isStreaming || pendingFiles.length >= 5}
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded",
+              "text-muted-foreground hover:text-foreground transition-colors",
+              "disabled:opacity-40 disabled:cursor-not-allowed",
+            )}
+            title="Attach file"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <textarea
             ref={textareaRef}
             value={input}

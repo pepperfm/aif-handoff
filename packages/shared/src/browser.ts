@@ -20,6 +20,7 @@ export {
   type RoadmapCompletePayload,
   type RoadmapErrorPayload,
   type ChatMessage,
+  type ChatAttachment,
   type ChatRequest,
   type ChatStreamTokenPayload,
   type ChatDonePayload,
