@@ -3,6 +3,7 @@ import { Download } from "lucide-react";
 import type { TaskCommentAttachment } from "@aif/shared/browser";
 import { Button } from "@/components/ui/button";
 import { ToggleButton } from "@/components/ui/toggle-button";
+import { FileInput } from "@/components/ui/file-input";
 
 interface TaskAttachmentsProps {
   taskId: string;
@@ -49,14 +50,13 @@ export function TaskAttachments({
           >
             Drag files here to attach
           </div>
-          <input
-            type="file"
+          <FileInput
             multiple
+            label="Attach files"
             onChange={(e) => {
               onFilesSelected(e.target.files);
               e.currentTarget.value = "";
             }}
-            className="block w-full text-xs text-muted-foreground file:mr-3 file:border file:border-border file:bg-secondary/40 file:px-3 file:py-1.5 file:text-xs"
           />
           {attachments.length === 0 ? (
             <p className="text-xs text-muted-foreground">No files attached to this task.</p>
