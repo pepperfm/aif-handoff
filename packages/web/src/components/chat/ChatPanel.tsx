@@ -153,11 +153,7 @@ const MessageBubble = memo(function MessageBubble({
               isUser ? "bg-blue-600/15 text-foreground" : "bg-violet-600/15 text-foreground",
             )}
           >
-            {isUser ? (
-              <p className="whitespace-pre-wrap">{displayContent}</p>
-            ) : (
-              <Markdown content={displayContent} className="text-sm" />
-            )}
+            <Markdown content={displayContent} className="text-sm" />
             {message.attachments && message.attachments.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {message.attachments.map((att, idx) =>
