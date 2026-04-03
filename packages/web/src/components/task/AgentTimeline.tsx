@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface AgentTimelineProps {
   activityLog: string | null;
@@ -95,7 +96,7 @@ export function AgentTimeline({ activityLog }: AgentTimelineProps) {
   }, [activityLog, filter]);
 
   if (!activityLog) {
-    return <div className="text-sm text-muted-foreground italic">No agent activity yet</div>;
+    return <EmptyState message="No agent activity yet" />;
   }
 
   return (

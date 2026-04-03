@@ -1,4 +1,5 @@
 import { Markdown } from "@/components/ui/markdown";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface TaskLogProps {
   log: string | null;
@@ -7,11 +8,7 @@ interface TaskLogProps {
 
 export function TaskLog({ log, label }: TaskLogProps) {
   if (!log) {
-    return (
-      <div className="text-sm text-muted-foreground italic">
-        No {label.toLowerCase()} yet
-      </div>
-    );
+    return <EmptyState message={`No ${label.toLowerCase()} yet`} />;
   }
 
   return (

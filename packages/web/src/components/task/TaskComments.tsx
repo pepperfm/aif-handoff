@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Bot, Download, User } from "lucide-react";
 import { useTaskComments } from "@/hooks/useTasks";
 import { Markdown } from "@/components/ui/markdown";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface TaskCommentsProps {
   taskId: string;
@@ -18,11 +19,11 @@ export function TaskComments({ taskId }: TaskCommentsProps) {
   const reversedComments = useMemo(() => (comments ? [...comments].reverse() : []), [comments]);
 
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground italic">Loading comments...</div>;
+    return <EmptyState message="Loading comments..." />;
   }
 
   if (!comments || comments.length === 0) {
-    return <div className="text-sm text-muted-foreground italic">No comments yet</div>;
+    return <EmptyState message="No comments yet" />;
   }
 
   return (

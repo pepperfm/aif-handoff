@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Markdown } from "@/components/ui/markdown";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface TaskPlanProps {
   plan: string | null;
@@ -10,7 +11,7 @@ export function TaskPlan({ plan }: TaskPlanProps) {
   const [expanded, setExpanded] = useState(false);
 
   if (!plan) {
-    return <div className="text-sm text-muted-foreground italic">No plan generated yet</div>;
+    return <EmptyState message="No plan generated yet" />;
   }
 
   return (
