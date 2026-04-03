@@ -15,6 +15,10 @@ const mockDefaultsData = {
     | undefined,
 };
 
+vi.mock("@/hooks/useProjects", () => ({
+  useProjects: () => ({ data: [{ id: "p-1", parallelEnabled: false }] }),
+}));
+
 vi.mock("@/hooks/useSettings", () => ({
   useSettings: () => ({ data: mockSettingsData.data }),
   useProjectDefaults: () => ({ data: mockDefaultsData.data }),

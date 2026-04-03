@@ -1,9 +1,14 @@
 import {
-  findCoordinatorTaskCandidate,
+  findCoordinatorTaskCandidates,
   findProjectById,
+  hasActiveLockedTaskForProject,
+  claimTask,
+  releaseTaskClaim,
+  releaseStaleTaskClaims,
   updateTaskStatus as updateTaskStatusRow,
   type CoordinatorStage,
   type TaskFieldsPatch,
+  type TaskRow,
 } from "@aif/data";
 import {
   logger,
@@ -22,11 +27,15 @@ import { notifyTaskBroadcast, type TaskNotificationInfo } from "./notifier.js";
 import { handleAutoReviewGate } from "./autoReviewHandler.js";
 import { classifyStageError } from "./stageErrorHandler.js";
 import { setActiveStageAbortController } from "./stageAbort.js";
+import { setCoordinatorId } from "./subagentQuery.js";
 import { releaseDueBlockedTasks, recoverStaleInProgressTasks } from "./taskWatchdog.js";
 
 const log = logger("coordinator");
 const env = getEnv();
 const STAGE_RUN_TIMEOUT_MS = Math.max(env.AGENT_STAGE_RUN_TIMEOUT_MS, 60_000);
+const CLAIM_LOCK_DURATION_MS = STAGE_RUN_TIMEOUT_MS + 5 * 60 * 1000; // stage timeout + 5 min buffer
+export const COORDINATOR_ID = crypto.randomUUID();
+setCoordinatorId(COORDINATOR_ID);
 
 const runtimeCounters = {
   fastRetryStreamInterruptions: 0,
@@ -71,6 +80,42 @@ const PIPELINE: StatusTransition[] = [
   },
 ];
 
+// ── Stage Semaphore ──────────────────────────────────────────
+
+class StageSemaphore {
+  private counts = new Map<string, number>();
+
+  tryAcquire(stage: string, max: number): boolean {
+    const current = this.counts.get(stage) ?? 0;
+    if (current >= max) return false;
+    this.counts.set(stage, current + 1);
+    return true;
+  }
+
+  release(stage: string): void {
+    const current = this.counts.get(stage) ?? 0;
+    this.counts.set(stage, Math.max(0, current - 1));
+  }
+
+  available(stage: string, max: number): number {
+    return max - (this.counts.get(stage) ?? 0);
+  }
+
+  totalActive(): number {
+    let total = 0;
+    for (const count of this.counts.values()) total += count;
+    return total;
+  }
+
+  reset(): void {
+    this.counts.clear();
+  }
+}
+
+const stageSemaphore = new StageSemaphore();
+
+// ── Public API ───────────────────────────────────────────────
+
 export function getCoordinatorRuntimeCounters(): Readonly<typeof runtimeCounters> {
   return { ...runtimeCounters };
 }
@@ -79,6 +124,12 @@ export function resetCoordinatorRuntimeCountersForTests(): void {
   runtimeCounters.fastRetryStreamInterruptions = 0;
 }
 
+export function getStageSemaphore(): StageSemaphore {
+  return stageSemaphore;
+}
+
+// ── Stage execution ──────────────────────────────────────────
+
 async function runStageWithTimeout(
   runner: (taskId: string, projectRoot: string) => Promise<void>,
   taskId: string,
@@ -86,7 +137,7 @@ async function runStageWithTimeout(
   stageLabel: string,
 ): Promise<void> {
   const abort = new AbortController();
-  setActiveStageAbortController(abort);
+  setActiveStageAbortController(taskId, abort);
 
   try {
     await withTimeout(
@@ -95,14 +146,13 @@ async function runStageWithTimeout(
       `Stage ${stageLabel} timed out after ${STAGE_RUN_TIMEOUT_MS}ms`,
     );
   } catch (err) {
-    // On timeout, abort the running subagent process so it doesn't become a zombie
     if (!abort.signal.aborted) {
       abort.abort();
       log.warn({ taskId, stage: stageLabel }, "Aborted subagent process after stage timeout");
     }
     throw err;
   } finally {
-    setActiveStageAbortController(null);
+    setActiveStageAbortController(taskId, null);
   }
 }
 
@@ -114,200 +164,315 @@ function updateTaskStatus(
   info: TaskNotificationInfo = {},
 ): void {
   updateTaskStatusRow(taskId, status, extra);
-  // When status didn't actually change (e.g. plan-checker: plan_ready → plan_ready),
-  // send WS broadcast (UI needs to refresh plan content) but skip Telegram notification.
   const broadcastType =
     info.fromStatus && info.fromStatus === status ? "task:updated" : "task:moved";
   void notifyTaskBroadcast(taskId, broadcastType, { ...info, toStatus: status });
 }
 
-export async function pollAndProcess(): Promise<void> {
-  log.debug("Starting poll cycle");
-  releaseDueBlockedTasks();
-  recoverStaleInProgressTasks();
+// ── Single task processing ───────────────────────────────────
 
-  for (const stage of PIPELINE) {
-    const task = findCoordinatorTaskCandidate(stage.label);
+/** Returns true on success, false on failure. */
+async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+  const project = findProjectById(task.projectId);
 
-    if (!task) {
-      log.debug({ stage: stage.label }, "No tasks to process");
-      continue;
-    }
-
-    log.debug(
-      { stage: stage.label, taskId: task.id, candidateStatus: task.status },
-      "Task candidate selected",
+  if (!project) {
+    log.error(
+      { taskId: task.id, projectId: task.projectId },
+      "Project not found for task, skipping",
     );
+    return false;
+  }
 
-    const project = findProjectById(task.projectId);
+  initProjectDirectory(project.rootPath);
 
-    if (!project) {
-      log.error(
-        { taskId: task.id, projectId: task.projectId },
-        "Project not found for task, skipping",
+  log.info(
+    { taskId: task.id, title: task.title, stage: stage.label, projectRoot: project.rootPath },
+    "Picked up task for processing",
+  );
+  const sourceStatus = task.status;
+  const taskTitle = task.title;
+
+  updateTaskStatus(task.id, stage.inProgress, {}, { title: taskTitle, fromStatus: sourceStatus });
+
+  log.debug(
+    { taskId: task.id, from: sourceStatus, to: stage.inProgress },
+    "Status transition (start)",
+  );
+
+  try {
+    await runStageWithTimeout(stage.runner, task.id, project.rootPath, stage.label);
+
+    flushActivityQueue(task.id);
+
+    if (stage.label === "implementer" && task.skipReview) {
+      updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
+        title: taskTitle,
+        fromStatus: stage.inProgress,
+      });
+      log.info(
+        { taskId: task.id, from: stage.inProgress, to: "done" },
+        "Skip review enabled — bypassing review stage",
       );
-      continue;
+      return true;
     }
 
-    initProjectDirectory(project.rootPath);
+    if (stage.label === "reviewer") {
+      const outcome = await handleAutoReviewGate({
+        taskId: task.id,
+        projectRoot: project.rootPath,
+      });
 
-    log.info(
-      { taskId: task.id, title: task.title, stage: stage.label, projectRoot: project.rootPath },
-      "Picked up task for processing",
-    );
-    const sourceStatus = task.status;
-    const taskTitle = task.title;
-
-    updateTaskStatus(task.id, stage.inProgress, {}, { title: taskTitle, fromStatus: sourceStatus });
-
-    log.debug(
-      { taskId: task.id, from: sourceStatus, to: stage.inProgress },
-      "Status transition (start)",
-    );
-
-    try {
-      await runStageWithTimeout(stage.runner, task.id, project.rootPath, stage.label);
-
-      flushActivityQueue(task.id);
-
-      // Skip review: if task has skipReview, jump straight to done after implementing
-      if (stage.label === "implementer" && task.skipReview) {
+      if (outcome === "max_iterations_reached") {
         updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
           title: taskTitle,
           fromStatus: stage.inProgress,
         });
         log.info(
           { taskId: task.id, from: stage.inProgress, to: "done" },
-          "Skip review enabled — bypassing review stage",
+          "Auto review gate: max iterations reached, moving to done",
+        );
+        return true;
+      }
+
+      if (outcome === "rework_requested") {
+        const currentCount = task.reviewIterationCount ?? 0;
+        updateTaskStatus(
+          task.id,
+          "implementing",
+          {
+            ...CLEAN_STATE_RESET,
+            reworkRequested: true,
+            reviewIterationCount: currentCount + 1,
+          },
+          { title: taskTitle, fromStatus: stage.inProgress },
+        );
+        log.info(
+          {
+            taskId: task.id,
+            from: stage.inProgress,
+            to: "implementing",
+            reviewIteration: currentCount + 1,
+          },
+          "Auto review gate requested changes, restarting implementing stage",
+        );
+        return true;
+      }
+    }
+
+    updateTaskStatus(
+      task.id,
+      stage.onSuccess,
+      {
+        ...CLEAN_STATE_RESET,
+        reviewIterationCount: stage.label === "implementer" ? (task.reviewIterationCount ?? 0) : 0,
+      },
+      { title: taskTitle, fromStatus: stage.inProgress },
+    );
+
+    log.info(
+      { taskId: task.id, from: stage.inProgress, to: stage.onSuccess },
+      "Status transition (success)",
+    );
+    return true;
+  } catch (err) {
+    const recovery = classifyStageError({
+      taskId: task.id,
+      stageLabel: stage.label,
+      sourceStatus,
+      retryCount: task.retryCount ?? 0,
+      err,
+    });
+
+    switch (recovery.kind) {
+      case "fast_retry":
+        runtimeCounters.fastRetryStreamInterruptions += 1;
+        log.warn(
+          {
+            taskId: task.id,
+            stage: stage.label,
+            metric: "coordinator.fast_retry_stream_interruptions",
+            fastRetryStreamInterruptions: runtimeCounters.fastRetryStreamInterruptions,
+          },
+          "Fast retry scheduled after transient stream interruption",
+        );
+        updateTaskStatus(
+          task.id,
+          stage.inProgress,
+          {
+            blockedReason: null,
+            blockedFromStatus: null,
+            retryAfter: null,
+          },
+          { title: taskTitle, fromStatus: stage.inProgress },
+        );
+        break;
+
+      case "blocked_external":
+        updateTaskStatus(
+          task.id,
+          "blocked_external",
+          {
+            blockedReason: err instanceof Error ? err.message : String(err),
+            blockedFromStatus: stage.inProgress,
+            retryAfter: recovery.retryAfter,
+            retryCount: recovery.retryCount,
+          },
+          { title: taskTitle, fromStatus: stage.inProgress },
+        );
+        break;
+
+      case "revert":
+        updateTaskStatus(
+          task.id,
+          stage.inProgress,
+          {},
+          { title: taskTitle, fromStatus: stage.inProgress },
+        );
+        break;
+    }
+
+    flushActivityQueue(task.id);
+    return false;
+  }
+}
+
+// ── Poll cycle ───────────────────────────────────────────────
+
+export async function pollAndProcess(): Promise<void> {
+  log.debug("Starting poll cycle");
+
+  // Release stale locks BEFORE watchdog — otherwise watchdog moves task to blocked_external
+  // and the lock remains orphaned (heartbeat cleanup filters by in-progress status)
+  const released = releaseStaleTaskClaims();
+  if (released > 0) {
+    log.info({ released }, "Released stale task claims");
+  }
+
+  releaseDueBlockedTasks();
+  recoverStaleInProgressTasks();
+
+  const globalMax = env.COORDINATOR_MAX_CONCURRENT_TASKS;
+
+  // Track tasks that failed in this cycle — prevent re-picking in downstream stages
+  const failedInCycle = new Set<string>();
+
+  // Cache project parallel settings to avoid repeated lookups
+  const projectParallelCache = new Map<string, boolean>();
+  function isProjectParallel(projectId: string): boolean {
+    let cached = projectParallelCache.get(projectId);
+    if (cached === undefined) {
+      const project = findProjectById(projectId);
+      cached = project?.parallelEnabled ?? false;
+      projectParallelCache.set(projectId, cached);
+    }
+    return cached;
+  }
+
+  for (const stage of PIPELINE) {
+    // Global cap: total active tasks across all stages (prevents resource exhaustion
+    // when multiple poll cycles overlap from cron + wake)
+    const totalActive = stageSemaphore.totalActive();
+    if (totalActive >= globalMax) {
+      log.debug(
+        { stage: stage.label, totalActive, globalMax },
+        "Global task limit reached, skipping stage",
+      );
+      continue;
+    }
+
+    // Per-project spawn count scoped to this stage (stages are sequential via allSettled)
+    const projectSpawnCount = new Map<string, number>();
+
+    const availableInStage = stageSemaphore.available(stage.label, globalMax);
+    const availableGlobal = globalMax - totalActive;
+    const available = Math.min(availableInStage, availableGlobal);
+    if (available <= 0) {
+      log.debug({ stage: stage.label }, "Stage at capacity, skipping");
+      continue;
+    }
+
+    const candidates = findCoordinatorTaskCandidates(stage.label, available).filter(
+      (t) => !failedInCycle.has(t.id),
+    );
+
+    if (candidates.length === 0) {
+      log.debug({ stage: stage.label }, "No tasks to process");
+      continue;
+    }
+
+    log.debug(
+      { stage: stage.label, candidateCount: candidates.length, available },
+      "Task candidates selected",
+    );
+
+    const spawned: Promise<void>[] = [];
+
+    for (const task of candidates) {
+      // Per-project concurrency: non-parallel projects limited to 1 task at a time
+      const parallel = isProjectParallel(task.projectId);
+      const projectMax = parallel ? globalMax : 1;
+      const projectCount = projectSpawnCount.get(task.projectId) ?? 0;
+      if (projectCount >= projectMax) {
+        log.debug(
+          { taskId: task.id, projectId: task.projectId },
+          "Project at capacity, skipping task",
         );
         continue;
       }
 
-      // Auto review gate: after reviewer in autoMode, decide accept vs rework
-      if (stage.label === "reviewer") {
-        const outcome = await handleAutoReviewGate({
-          taskId: task.id,
-          projectRoot: project.rootPath,
+      // Cross-cycle guard: for non-parallel projects, check DB for any active lock
+      // (another concurrent poll cycle may have already claimed a task for this project)
+      if (!parallel && hasActiveLockedTaskForProject(task.projectId)) {
+        log.debug(
+          { taskId: task.id, projectId: task.projectId },
+          "Non-parallel project has active lock from another cycle, skipping",
+        );
+        continue;
+      }
+
+      if (!claimTask(task.id, COORDINATOR_ID, CLAIM_LOCK_DURATION_MS)) {
+        log.debug({ taskId: task.id, stage: stage.label }, "Task claim failed (already claimed)");
+        continue;
+      }
+
+      if (
+        stageSemaphore.totalActive() >= globalMax ||
+        !stageSemaphore.tryAcquire(stage.label, globalMax)
+      ) {
+        releaseTaskClaim(task.id);
+        log.debug({ stage: stage.label }, "Semaphore full after claim");
+        break;
+      }
+
+      projectSpawnCount.set(task.projectId, projectCount + 1);
+
+      log.debug(
+        { stage: stage.label, taskId: task.id, candidateStatus: task.status, parallel },
+        "Task claimed for processing",
+      );
+
+      const taskPromise = processOneTask(task, stage)
+        .then((success) => {
+          if (!success) failedInCycle.add(task.id);
+        })
+        .catch((err) => {
+          failedInCycle.add(task.id);
+          log.error(
+            { taskId: task.id, stage: stage.label, err },
+            "Unexpected error in task processing",
+          );
+        })
+        .finally(() => {
+          stageSemaphore.release(stage.label);
+          releaseTaskClaim(task.id);
         });
 
-        if (outcome === "max_iterations_reached") {
-          updateTaskStatus(task.id, "done", CLEAN_STATE_RESET, {
-            title: taskTitle,
-            fromStatus: stage.inProgress,
-          });
+      spawned.push(taskPromise);
+    }
 
-          log.info(
-            { taskId: task.id, from: stage.inProgress, to: "done" },
-            "Auto review gate: max iterations reached, moving to done",
-          );
-          continue;
-        }
-
-        if (outcome === "rework_requested") {
-          const currentCount = task.reviewIterationCount ?? 0;
-          updateTaskStatus(
-            task.id,
-            "implementing",
-            {
-              ...CLEAN_STATE_RESET,
-              reworkRequested: true,
-              reviewIterationCount: currentCount + 1,
-            },
-            { title: taskTitle, fromStatus: stage.inProgress },
-          );
-
-          log.info(
-            {
-              taskId: task.id,
-              from: stage.inProgress,
-              to: "implementing",
-              reviewIteration: currentCount + 1,
-            },
-            "Auto review gate requested changes, restarting implementing stage",
-          );
-          continue;
-        }
-      }
-
-      updateTaskStatus(
-        task.id,
-        stage.onSuccess,
-        {
-          ...CLEAN_STATE_RESET,
-          // Preserve review iteration count when transitioning implementing → review
-          // so the auto review gate can enforce max iterations across rework cycles.
-          reviewIterationCount:
-            stage.label === "implementer" ? (task.reviewIterationCount ?? 0) : 0,
-        },
-        { title: taskTitle, fromStatus: stage.inProgress },
-      );
-
-      log.info(
-        { taskId: task.id, from: stage.inProgress, to: stage.onSuccess },
-        "Status transition (success)",
-      );
-    } catch (err) {
-      const recovery = classifyStageError({
-        taskId: task.id,
-        stageLabel: stage.label,
-        sourceStatus,
-        retryCount: task.retryCount ?? 0,
-        err,
-      });
-
-      switch (recovery.kind) {
-        case "fast_retry":
-          runtimeCounters.fastRetryStreamInterruptions += 1;
-          log.warn(
-            {
-              taskId: task.id,
-              stage: stage.label,
-              metric: "coordinator.fast_retry_stream_interruptions",
-              fastRetryStreamInterruptions: runtimeCounters.fastRetryStreamInterruptions,
-            },
-            "Fast retry scheduled after transient stream interruption",
-          );
-          updateTaskStatus(
-            task.id,
-            stage.inProgress,
-            {
-              blockedReason: null,
-              blockedFromStatus: null,
-              retryAfter: null,
-            },
-            { title: taskTitle, fromStatus: stage.inProgress },
-          );
-          break;
-
-        case "blocked_external":
-          updateTaskStatus(
-            task.id,
-            "blocked_external",
-            {
-              blockedReason: err instanceof Error ? err.message : String(err),
-              blockedFromStatus: stage.inProgress,
-              retryAfter: recovery.retryAfter,
-              retryCount: recovery.retryCount,
-            },
-            { title: taskTitle, fromStatus: stage.inProgress },
-          );
-          break;
-
-        case "revert":
-          updateTaskStatus(
-            task.id,
-            stage.inProgress,
-            {},
-            { title: taskTitle, fromStatus: stage.inProgress },
-          );
-          break;
-      }
-
-      flushActivityQueue(task.id);
-
-      // Stop current poll cycle after a failed stage to avoid immediately
-      // re-picking the same task in a downstream stage in this same cycle.
-      break;
+    // Within-stage parallelism: await all tasks in this stage before moving to next
+    if (spawned.length > 0) {
+      await Promise.allSettled(spawned);
     }
   }
 

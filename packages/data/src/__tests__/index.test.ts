@@ -38,6 +38,12 @@ const {
   findTasksByRoadmapAlias,
   persistTaskPlanForTask,
   findCoordinatorTaskCandidate,
+  findCoordinatorTaskCandidates,
+  claimTask,
+  releaseTaskClaim,
+  releaseStaleTaskClaims,
+  hasActiveLockedTaskForProject,
+  renewTaskClaim,
   searchTasks,
   touchLastSyncedAt,
   listTasksPaginated,
@@ -438,6 +444,235 @@ describe("data layer", () => {
       const candidate = findCoordinatorTaskCandidate("reviewer");
       expect(candidate).toBeDefined();
       expect(candidate!.id).toBe("rv-task");
+    });
+  });
+
+  // ── Batch task selection ─────────────────────────────────
+
+  describe("findCoordinatorTaskCandidates", () => {
+    it("returns multiple candidates up to limit", () => {
+      const db = testDb.current;
+      db.insert(tasks).values({ id: "t1", projectId: "proj-1", title: "A", status: "planning", position: 1 }).run();
+      db.insert(tasks).values({ id: "t2", projectId: "proj-1", title: "B", status: "planning", position: 2 }).run();
+      db.insert(tasks).values({ id: "t3", projectId: "proj-1", title: "C", status: "planning", position: 3 }).run();
+
+      const all = findCoordinatorTaskCandidates("planner", 10);
+      expect(all).toHaveLength(3);
+      expect(all[0].id).toBe("t1");
+
+      const limited = findCoordinatorTaskCandidates("planner", 2);
+      expect(limited).toHaveLength(2);
+    });
+
+    it("excludes locked tasks", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+      db.insert(tasks).values({ id: "locked", projectId: "proj-1", title: "Locked", status: "planning", lockedBy: "worker-1", lockedUntil: future }).run();
+      db.insert(tasks).values({ id: "free", projectId: "proj-1", title: "Free", status: "planning" }).run();
+
+      const candidates = findCoordinatorTaskCandidates("planner", 10);
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].id).toBe("free");
+    });
+
+    it("includes tasks with expired locks", () => {
+      const db = testDb.current;
+      const past = new Date(Date.now() - 1000).toISOString();
+      db.insert(tasks).values({ id: "stale-lock", projectId: "proj-1", title: "Stale", status: "planning", lockedBy: "dead-worker", lockedUntil: past }).run();
+
+      const candidates = findCoordinatorTaskCandidates("planner", 10);
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].id).toBe("stale-lock");
+    });
+  });
+
+  // ── Task claiming ──────────────────────────────────────
+
+  describe("claimTask", () => {
+    it("claims an unlocked task", () => {
+      const db = testDb.current;
+      db.insert(tasks).values({ id: "claim-me", projectId: "proj-1", title: "Claim", status: "planning" }).run();
+
+      const claimed = claimTask("claim-me", "coord-1", 600_000);
+      expect(claimed).toBe(true);
+
+      const task = findTaskById("claim-me");
+      expect(task!.lockedBy).toBe("coord-1");
+      expect(task!.lockedUntil).toBeTruthy();
+    });
+
+    it("rejects claim on already-locked task", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+      db.insert(tasks).values({ id: "busy", projectId: "proj-1", title: "Busy", status: "planning", lockedBy: "coord-1", lockedUntil: future }).run();
+
+      const claimed = claimTask("busy", "coord-2", 600_000);
+      expect(claimed).toBe(false);
+
+      const task = findTaskById("busy");
+      expect(task!.lockedBy).toBe("coord-1");
+    });
+
+    it("claims task with expired lock", () => {
+      const db = testDb.current;
+      const past = new Date(Date.now() - 1000).toISOString();
+      db.insert(tasks).values({ id: "expired", projectId: "proj-1", title: "Expired", status: "planning", lockedBy: "dead", lockedUntil: past }).run();
+
+      const claimed = claimTask("expired", "coord-2", 600_000);
+      expect(claimed).toBe(true);
+
+      const task = findTaskById("expired");
+      expect(task!.lockedBy).toBe("coord-2");
+    });
+  });
+
+  describe("releaseTaskClaim", () => {
+    it("clears lock fields", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+      db.insert(tasks).values({ id: "release-me", projectId: "proj-1", title: "Release", status: "planning", lockedBy: "coord-1", lockedUntil: future }).run();
+
+      releaseTaskClaim("release-me");
+
+      const task = findTaskById("release-me");
+      expect(task!.lockedBy).toBeNull();
+      expect(task!.lockedUntil).toBeNull();
+    });
+  });
+
+  describe("releaseStaleTaskClaims", () => {
+    it("releases expired claims and returns count", () => {
+      const db = testDb.current;
+      const past = new Date(Date.now() - 1000).toISOString();
+      const future = new Date(Date.now() + 3600000).toISOString();
+      db.insert(tasks).values({ id: "stale1", projectId: "proj-1", title: "S1", status: "planning", lockedBy: "dead", lockedUntil: past }).run();
+      db.insert(tasks).values({ id: "stale2", projectId: "proj-1", title: "S2", status: "planning", lockedBy: "dead", lockedUntil: past }).run();
+      db.insert(tasks).values({ id: "active", projectId: "proj-1", title: "Active", status: "planning", lockedBy: "alive", lockedUntil: future, lastHeartbeatAt: new Date().toISOString() }).run();
+
+      const released = releaseStaleTaskClaims();
+      expect(released).toBe(2);
+
+      expect(findTaskById("stale1")!.lockedBy).toBeNull();
+      expect(findTaskById("stale2")!.lockedBy).toBeNull();
+      expect(findTaskById("active")!.lockedBy).toBe("alive");
+    });
+
+    it("returns 0 when no stale claims", () => {
+      expect(releaseStaleTaskClaims()).toBe(0);
+    });
+
+    it("releases claims with dead heartbeat and stale updatedAt", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+      const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      // Lock not expired, but heartbeat dead and updatedAt stale → should release
+      db.insert(tasks).values({
+        id: "dead-hb", projectId: "proj-1", title: "Dead HB", status: "implementing",
+        lockedBy: "crashed-coord", lockedUntil: future,
+        lastHeartbeatAt: staleTime, updatedAt: staleTime,
+      }).run();
+
+      const released = releaseStaleTaskClaims();
+      expect(released).toBe(1);
+      expect(findTaskById("dead-hb")!.lockedBy).toBeNull();
+    });
+
+    it("does NOT release fresh claims with null heartbeat", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+
+      // Just claimed — updatedAt is fresh, heartbeat not yet set
+      db.insert(tasks).values({
+        id: "fresh", projectId: "proj-1", title: "Fresh", status: "planning",
+        lockedBy: "coord-1", lockedUntil: future,
+        lastHeartbeatAt: null, updatedAt: new Date().toISOString(),
+      }).run();
+
+      const released = releaseStaleTaskClaims();
+      expect(released).toBe(0);
+      expect(findTaskById("fresh")!.lockedBy).toBe("coord-1");
+    });
+  });
+
+  // ── hasActiveLockedTaskForProject ──────────────────────
+
+  describe("hasActiveLockedTaskForProject", () => {
+    it("returns true when project has active lock", () => {
+      const db = testDb.current;
+      const future = new Date(Date.now() + 3600000).toISOString();
+      db.insert(tasks).values({
+        id: "locked-1", projectId: "proj-1", title: "Locked", status: "planning",
+        lockedBy: "coord-1", lockedUntil: future,
+      }).run();
+
+      expect(hasActiveLockedTaskForProject("proj-1")).toBe(true);
+      expect(hasActiveLockedTaskForProject("proj-other")).toBe(false);
+    });
+
+    it("returns false when lock is expired", () => {
+      const db = testDb.current;
+      const past = new Date(Date.now() - 1000).toISOString();
+      db.insert(tasks).values({
+        id: "expired-1", projectId: "proj-1", title: "Expired", status: "planning",
+        lockedBy: "coord-1", lockedUntil: past,
+      }).run();
+
+      expect(hasActiveLockedTaskForProject("proj-1")).toBe(false);
+    });
+
+    it("returns false when no tasks locked", () => {
+      expect(hasActiveLockedTaskForProject("proj-1")).toBe(false);
+    });
+  });
+
+  // ── renewTaskClaim ─────────────────────────────────────
+
+  describe("renewTaskClaim", () => {
+    it("extends lock expiry for the owning coordinator", () => {
+      const db = testDb.current;
+      const soon = new Date(Date.now() + 60_000).toISOString();
+      db.insert(tasks).values({
+        id: "renew-1", projectId: "proj-1", title: "R1", status: "implementing",
+        lockedBy: "coord-1", lockedUntil: soon,
+      }).run();
+
+      renewTaskClaim("renew-1", "coord-1", 30 * 60 * 1000);
+
+      const task = findTaskById("renew-1")!;
+      expect(task.lockedBy).toBe("coord-1");
+      // New expiry should be ~30 min from now, much later than the original 1 min
+      const newExpiry = new Date(task.lockedUntil!).getTime();
+      expect(newExpiry).toBeGreaterThan(Date.now() + 25 * 60 * 1000);
+    });
+
+    it("does not renew lock owned by a different coordinator", () => {
+      const db = testDb.current;
+      const soon = new Date(Date.now() + 60_000).toISOString();
+      db.insert(tasks).values({
+        id: "renew-other", projectId: "proj-1", title: "RO", status: "implementing",
+        lockedBy: "coord-1", lockedUntil: soon,
+      }).run();
+
+      renewTaskClaim("renew-other", "coord-2", 30 * 60 * 1000);
+
+      const task = findTaskById("renew-other")!;
+      // Lock unchanged — still owned by coord-1 with original expiry
+      expect(task.lockedBy).toBe("coord-1");
+      expect(task.lockedUntil).toBe(soon);
+    });
+
+    it("does nothing for unlocked tasks", () => {
+      const db = testDb.current;
+      db.insert(tasks).values({
+        id: "renew-2", projectId: "proj-1", title: "R2", status: "planning",
+      }).run();
+
+      renewTaskClaim("renew-2", "coord-1", 30 * 60 * 1000);
+
+      const task = findTaskById("renew-2")!;
+      expect(task.lockedBy).toBeNull();
+      expect(task.lockedUntil).toBeNull();
     });
   });
 

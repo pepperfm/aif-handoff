@@ -72,6 +72,11 @@ tasksRouter.post("/", zValidator("json", createTaskSchema as any), async (c) => 
     ? getProjectConfig(project.rootPath).paths.plan
     : ".ai-factory/PLAN.md";
 
+  // Parallel-enabled projects enforce full mode and unique planPath
+  if (project?.parallelEnabled) {
+    body.plannerMode = "full";
+  }
+
   // Pre-create the task to get an ID, then persist attachments to storage
   const created = createTask({
     projectId: body.projectId,
@@ -252,6 +257,14 @@ tasksRouter.put("/:id", zValidator("json", updateTaskSchema as any), async (c) =
   const existing = findTaskById(id);
   if (!existing) {
     return c.json({ error: "Task not found" }, 404);
+  }
+
+  // Parallel-enabled projects enforce full mode
+  const project = findProjectById(existing.projectId);
+  if (project?.parallelEnabled) {
+    if (body.plannerMode === "fast") {
+      return c.json({ error: "Parallel-enabled projects require full planner mode" }, 400);
+    }
   }
 
   const { plan, attachments: incomingAttachments, ...updatePayload } = body;

@@ -57,7 +57,11 @@ No cross-dependencies between `api`, `web`, and `agent`. Runtime integration is:
 
 ## Agent Pipeline
 
-The coordinator (`packages/agent/src/coordinator.ts`) uses a dual-trigger model: it polls via `node-cron` every 30 seconds as a fallback and also reacts to real-time events from the API WebSocket (task creation, moves, and explicit `agent:wake` signals). Duplicate wakes are debounced. If the WebSocket is unavailable, the coordinator falls back to polling-only mode. It delegates to `.claude/agents/` definitions:
+The coordinator (`packages/agent/src/coordinator.ts`) uses a dual-trigger model: it polls via `node-cron` every 30 seconds as a fallback and also reacts to real-time events from the API WebSocket (task creation, moves, and explicit `agent:wake` signals). Duplicate wakes are debounced. If the WebSocket is unavailable, the coordinator falls back to polling-only mode.
+
+The coordinator supports **parallel task execution** (experimental, per-project). When a project has "Parallel Execution" enabled in settings, up to `COORDINATOR_MAX_CONCURRENT_TASKS` (default 3) tasks per stage run concurrently via `Promise.allSettled`. This value also serves as the global cap on total concurrent Claude processes across all stages and projects. Non-parallel projects always process 1 task at a time. Tasks are atomically claimed (`lockedBy`/`lockedUntil` columns) with lock duration tied to the stage timeout; heartbeats renew the lock periodically. Stale claims (expired TTL or dead heartbeat) are auto-released. On shutdown, active locks are released immediately.
+
+It delegates to `.claude/agents/` definitions:
 
 ```
 Backlog ──[start_ai]──► Planning ──► Plan Ready ──► Implementing ──► Review ──► Done ──► Verified
@@ -191,6 +195,7 @@ Runtime index bootstrap creates the following indexes via `CREATE INDEX IF NOT E
 - `idx_tasks_status_retry` — composite for coordinator retry queries
 - `idx_tasks_project_status` — composite for ordered task-list queries
 - `idx_task_comments_task_id` — comment lookups by task
+- `idx_tasks_locked` — parallel execution: find unlocked or stale-locked tasks
 
 ## See Also
 

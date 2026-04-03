@@ -17,6 +17,7 @@ export const createProjectSchema = z.object({
   planCheckerMaxBudgetUsd: z.number().positive().optional(),
   implementerMaxBudgetUsd: z.number().positive().optional(),
   reviewSidecarMaxBudgetUsd: z.number().positive().optional(),
+  parallelEnabled: z.boolean().optional(),
 });
 
 export const createTaskSchema = z.object({

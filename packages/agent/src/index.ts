@@ -4,6 +4,7 @@ import { getEnv, logger } from "@aif/shared";
 import { pollAndProcess } from "./coordinator.js";
 import { flushAllActivityQueues } from "./hooks.js";
 import { connectWakeChannel, closeWakeChannel, waitForApiReady } from "./wakeChannel.js";
+import { abortAllActiveStages } from "./stageAbort.js";
 
 const log = logger("agent");
 
@@ -21,21 +22,11 @@ const cronExpr = `*/${intervalSeconds} * * * * *`;
 
 log.info({ intervalMs, intervalSeconds, cronExpr }, "Agent coordinator starting");
 
-let isProcessing = false;
-
 cron.schedule(cronExpr, async () => {
-  if (isProcessing) {
-    log.debug("Previous poll cycle still running, skipping");
-    return;
-  }
-
-  isProcessing = true;
   try {
     await pollAndProcess();
   } catch (err) {
     log.error({ err }, "Unexpected error in poll cycle");
-  } finally {
-    isProcessing = false;
   }
 });
 
@@ -43,19 +34,11 @@ cron.schedule(cronExpr, async () => {
 // Event-driven wake: subscribe to API WS for immediate coordinator triggers
 // ---------------------------------------------------------------------------
 async function triggerWake(reason: string): Promise<void> {
-  if (isProcessing) {
-    log.debug({ reason }, "Wake signal received but poll cycle already running, skipping");
-    return;
-  }
-
   log.info({ reason }, "Wake-triggered poll cycle starting");
-  isProcessing = true;
   try {
     await pollAndProcess();
   } catch (err) {
     log.error({ err, reason }, "Unexpected error in wake-triggered poll cycle");
-  } finally {
-    isProcessing = false;
   }
 }
 
@@ -81,9 +64,10 @@ log.info("Agent coordinator is running. Press Ctrl+C to stop.");
 function onShutdown(signal: string): void {
   log.info(
     { signal },
-    "Shutdown signal received — closing wake channel and flushing activity queues",
+    "Shutdown signal received — aborting stages, closing wake channel, flushing activity queues",
   );
   try {
+    abortAllActiveStages();
     closeWakeChannel();
     flushAllActivityQueues();
     log.info("Shutdown flush complete");

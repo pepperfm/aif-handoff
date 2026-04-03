@@ -19,6 +19,7 @@ export interface Project {
   planCheckerMaxBudgetUsd: number | null;
   implementerMaxBudgetUsd: number | null;
   reviewSidecarMaxBudgetUsd: number | null;
+  parallelEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -30,6 +31,7 @@ export interface CreateProjectInput {
   planCheckerMaxBudgetUsd?: number;
   implementerMaxBudgetUsd?: number;
   reviewSidecarMaxBudgetUsd?: number;
+  parallelEnabled?: boolean;
 }
 
 export interface TaskCommentAttachment {

@@ -42,6 +42,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
   const [planCheckerMaxBudgetUsd, setPlanCheckerMaxBudgetUsd] = useState("");
   const [implementerMaxBudgetUsd, setImplementerMaxBudgetUsd] = useState("");
   const [reviewSidecarMaxBudgetUsd, setReviewSidecarMaxBudgetUsd] = useState("");
+  const [parallelEnabled, setParallelEnabled] = useState(false);
   const selectorRef = useRef<HTMLDivElement>(null);
 
   const selected = projects?.find((p) => p.id === selectedId);
@@ -63,6 +64,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
     setPlanCheckerMaxBudgetUsd("");
     setImplementerMaxBudgetUsd("");
     setReviewSidecarMaxBudgetUsd("");
+    setParallelEnabled(false);
     setDropdownOpen(false);
     setDialogOpen(true);
   };
@@ -83,6 +85,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
     setReviewSidecarMaxBudgetUsd(
       p.reviewSidecarMaxBudgetUsd == null ? "" : String(p.reviewSidecarMaxBudgetUsd),
     );
+    setParallelEnabled(p.parallelEnabled ?? false);
     setDropdownOpen(false);
     setDialogOpen(true);
   };
@@ -132,6 +135,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
           planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
           implementerMaxBudgetUsd: parsedImplementerBudget,
           reviewSidecarMaxBudgetUsd: parsedBudget,
+          parallelEnabled,
         },
         {
           onSuccess: (project) => {
@@ -151,6 +155,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
             planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
             implementerMaxBudgetUsd: parsedImplementerBudget,
             reviewSidecarMaxBudgetUsd: parsedBudget,
+            parallelEnabled,
           },
         },
         {
@@ -330,6 +335,29 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect }: Props) {
               <p className="mt-1 text-xs text-muted-foreground">
                 Per-sidecar budget for review and security agents. Empty means unlimited.
               </p>
+            </div>
+            <div className="flex items-center justify-between border border-border bg-card/50 p-3">
+              <div>
+                <label className="text-sm font-medium">Parallel Execution</label>
+                <p className="text-xs text-muted-foreground">
+                  Experimental. Process multiple tasks per stage concurrently.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={parallelEnabled}
+                onClick={() => setParallelEnabled(!parallelEnabled)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  parallelEnabled ? "bg-primary" : "bg-muted"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
+                    parallelEnabled ? "translate-x-4" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
             </div>
             {dialogMode === "edit" && (
               <div>

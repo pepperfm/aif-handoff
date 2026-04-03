@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import {
   incrementTaskTokenUsage,
   updateTaskHeartbeat,
+  renewTaskClaim,
   saveTaskSessionId,
   getTaskSessionId,
 } from "@aif/data";
@@ -130,8 +131,8 @@ async function runQueryAttempt(
     abortController: explicitAbort,
   } = options;
 
-  // Use explicitly provided AbortController, or fall back to the coordinator's active one
-  const abortController = explicitAbort ?? getActiveStageAbortController() ?? undefined;
+  // Use explicitly provided AbortController, or fall back to the coordinator's active one for this task
+  const abortController = explicitAbort ?? getActiveStageAbortController(taskId) ?? undefined;
 
   const subagentStartHooks: Array<{ hooks: HookCallback[] }> = [
     { hooks: [createSubagentLogger(taskId)] },
@@ -314,10 +315,20 @@ export async function executeSubagentQuery(
   }
 }
 
-/** Start a periodic heartbeat that updates the task's lastHeartbeatAt. */
+// Lock renewal duration: stage timeout + 5 min buffer (same as coordinator claim)
+const LOCK_RENEWAL_MS = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
+
+// Coordinator ID injected at startup to avoid circular imports
+let _coordinatorId: string | null = null;
+export function setCoordinatorId(id: string): void {
+  _coordinatorId = id;
+}
+
+/** Start a periodic heartbeat that updates the task's lastHeartbeatAt and renews the lock. */
 export function startHeartbeat(taskId: string): NodeJS.Timeout {
   return setInterval(() => {
     updateTaskHeartbeat(taskId);
+    if (_coordinatorId) renewTaskClaim(taskId, _coordinatorId, LOCK_RENEWAL_MS);
   }, HEARTBEAT_INTERVAL_MS);
 }
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useProjects } from "@/hooks/useProjects";
 import type { Task, UpdateTaskInput } from "@aif/shared/browser";
 
 interface Props {
@@ -10,6 +11,8 @@ interface Props {
 }
 
 export function TaskSettings({ task, onSave }: Props) {
+  const { data: projectsList } = useProjects();
+  const isParallel = projectsList?.find((p) => p.id === task.projectId)?.parallelEnabled ?? false;
   const [open, setOpen] = useState(false);
   const [autoMode, setAutoMode] = useState(task.autoMode);
   const [skipReview, setSkipReview] = useState(task.skipReview);
@@ -134,38 +137,52 @@ export function TaskSettings({ task, onSave }: Props) {
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Planner
           </p>
-          <div className="flex gap-3">
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <input
-                type="radio"
-                name="plannerModeDetail"
-                checked={plannerMode === "full"}
-                onChange={() => setPlannerMode("full")}
-                className="h-3.5 w-3.5 accent-[var(--color-primary)]"
-              />
+          {isParallel ? (
+            <p className="text-xs text-muted-foreground">
               <span className="font-medium text-foreground">Full</span>
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <input
-                type="radio"
-                name="plannerModeDetail"
-                checked={plannerMode === "fast"}
-                onChange={() => setPlannerMode("fast")}
-                className="h-3.5 w-3.5 accent-[var(--color-primary)]"
-              />
-              <span className="font-medium text-foreground">Fast</span>
-            </label>
-          </div>
+              <span className="ml-1.5 text-[10px]">(required by parallel mode)</span>
+            </p>
+          ) : (
+            <div className="flex gap-3">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="radio"
+                  name="plannerModeDetail"
+                  checked={plannerMode === "full"}
+                  onChange={() => setPlannerMode("full")}
+                  className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+                />
+                <span className="font-medium text-foreground">Full</span>
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="radio"
+                  name="plannerModeDetail"
+                  checked={plannerMode === "fast"}
+                  onChange={() => setPlannerMode("fast")}
+                  className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+                />
+                <span className="font-medium text-foreground">Fast</span>
+              </label>
+            </div>
+          )}
           <div className="space-y-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Plan file path
             </p>
-            <Input
-              value={planPath}
-              onChange={(e) => setPlanPath(e.target.value)}
-              placeholder=".ai-factory/PLAN.md"
-              className="h-7 text-xs"
-            />
+            {isParallel ? (
+              <p className="text-xs font-mono text-muted-foreground truncate">
+                {planPath}
+                <span className="ml-1.5 font-sans text-[10px]">(locked in parallel mode)</span>
+              </p>
+            ) : (
+              <Input
+                value={planPath}
+                onChange={(e) => setPlanPath(e.target.value)}
+                placeholder=".ai-factory/PLAN.md"
+                className="h-7 text-xs"
+              />
+            )}
           </div>
           <div className="flex gap-4">
             <Checkbox label="Docs" checked={planDocs} onChange={setPlanDocs} />

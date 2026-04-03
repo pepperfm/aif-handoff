@@ -34,6 +34,7 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `ACTIVITY_LOG_BATCH_MAX_AGE_MS`    | number  | `5000`              | Maximum age (ms) of buffered entries before auto-flush in batch mode                                                                                                                                                                                                    |
 | `ACTIVITY_LOG_QUEUE_LIMIT`         | number  | `500`               | Hard queue limit to prevent unbounded memory growth in batch mode                                                                                                                                                                                                       |
 | `AGENT_WAKE_ENABLED`               | boolean | `true`              | Enable event-driven coordinator wake via API WebSocket; set to `false` for polling-only mode                                                                                                                                                                            |
+| `COORDINATOR_MAX_CONCURRENT_TASKS` | number  | `3`                 | Max concurrent tasks per stage for parallel-enabled projects. Non-parallel projects always process 1 task at a time regardless of this value. Range 1–10                                                                                                                |
 | `AGENT_BYPASS_PERMISSIONS`         | boolean | `true`              | Bypass all Claude permission checks for subagents. When `false`, configure permissions via `.claude/settings.json` allow rules                                                                                                                                          |
 | `AGENT_USE_SUBAGENTS`              | boolean | `true`              | Default for the per-task "Use subagents" setting. Each task can override this in Planner settings. `true`: custom agents (`plan-coordinator`, `implement-coordinator`, sidecars). `false`: `aif-plan`, `aif-implement`, `aif-review`, `aif-security-checklist` directly |
 | `TELEGRAM_BOT_TOKEN`               | string  | _(optional)_        | Telegram bot token for task status notifications (see [Telegram Notifications](#telegram-notifications))                                                                                                                                                                |
@@ -164,6 +165,44 @@ Set `AGENT_BYPASS_PERMISSIONS=false` and add needed commands to `.claude/setting
 ```
 
 Unlisted commands will be denied in headless agent mode. See [Claude Code permissions docs](https://docs.anthropic.com/en/docs/claude-code/permissions) for the full rule syntax.
+
+## Parallel Execution (Experimental)
+
+By default, the coordinator processes one task at a time per project. Parallel execution allows multiple tasks to run concurrently for projects that opt in.
+
+### Setup
+
+1. Set the global concurrency cap in `.env`:
+
+```
+COORDINATOR_MAX_CONCURRENT_TASKS=3
+```
+
+2. Enable per-project in the web UI: open project settings and toggle **Parallel Execution**.
+
+### How It Works
+
+- The coordinator reads each task's project `parallelEnabled` flag to determine concurrency:
+  - **Parallel off** (default): 1 task per project at a time — identical to serial behavior
+  - **Parallel on**: up to `COORDINATOR_MAX_CONCURRENT_TASKS` tasks per project per stage
+- `COORDINATOR_MAX_CONCURRENT_TASKS` is also the **global cap** on total concurrent tasks across all stages and projects. With the default of 3, at most 3 Claude agent processes run simultaneously regardless of how many parallel-enabled projects exist
+- Tasks within a stage run concurrently via `Promise.allSettled` — a failure in one task does not block others
+- Tasks are atomically claimed via `lockedBy` / `lockedUntil` columns to prevent duplicate picks
+- Lock duration is tied to the stage timeout (`AGENT_STAGE_RUN_TIMEOUT_MS` + 5 min buffer). Heartbeats renew the lock periodically, so long-running stages keep their claim alive
+- Stale claims are auto-released at the start of each poll cycle: expired TTL, or dead heartbeat (> 5 min with no update) on in-progress tasks
+- On graceful shutdown (SIGINT/SIGTERM), all active task locks are released immediately
+
+### Constraints
+
+When parallel mode is enabled for a project, tasks are forced to `mode = full` (creates git branch/worktree per task) to ensure code isolation between concurrent agents. The UI disables mode selection and auto-generates unique plan file paths. The API enforces these constraints: creating a task in a parallel project auto-sets `plannerMode=full`, and updating to `fast` mode returns a 400 error.
+
+### Monitoring
+
+The coordinator logs concurrency state at `debug` level:
+
+- `"Stage at capacity, skipping"` — stage has reached its concurrency limit
+- `"Task claim failed (already claimed)"` — another poll cycle is already processing this task
+- `"Task candidates selected"` with `candidateCount` — number of tasks picked for parallel processing
 
 ## Agent Budgets
 

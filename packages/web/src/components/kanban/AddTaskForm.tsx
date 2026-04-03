@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateTask } from "@/hooks/useTasks";
+import { useProjects } from "@/hooks/useProjects";
 import { useSettings, useProjectDefaults } from "@/hooks/useSettings";
 import { generatePlanPath } from "@aif/shared/browser";
 
@@ -35,6 +36,9 @@ export function AddTaskForm({ projectId }: Props) {
 
   const { data: settings } = useSettings();
   const { data: defaults } = useProjectDefaults(projectId);
+  const { data: projectsList } = useProjects();
+  const currentProject = projectsList?.find((p) => p.id === projectId);
+  const isParallel = currentProject?.parallelEnabled ?? false;
 
   // Derive defaults from server data (no setState in effects)
   const useSubagentsDefault = settings?.useSubagents ?? true;
@@ -103,6 +107,12 @@ export function AddTaskForm({ projectId }: Props) {
     syncPlanPath(title, mode);
   };
 
+  // Effective values: parallel projects force full mode
+  const effectiveMode = isParallel ? "full" : plannerMode;
+  const effectivePlanPath = isParallel
+    ? generatePlanPath(title.trim(), "full", { plansDir, defaultPlanPath })
+    : planPath.trim() || defaultPlanPath;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -115,8 +125,8 @@ export function AddTaskForm({ projectId }: Props) {
         description: description.trim(),
         autoMode,
         isFix,
-        plannerMode,
-        planPath: planPath.trim() || defaultPlanPath,
+        plannerMode: effectiveMode,
+        planPath: effectivePlanPath,
         planDocs,
         planTests,
         skipReview,
@@ -248,45 +258,65 @@ export function AddTaskForm({ projectId }: Props) {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Mode
                 </p>
-                <div className="flex gap-3">
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <input
-                      type="radio"
-                      name="plannerMode"
-                      checked={plannerMode === "full"}
-                      onChange={() => handleModeChange("full")}
-                      className="h-3.5 w-3.5 accent-[var(--color-primary)]"
-                    />
+                {isParallel ? (
+                  <p className="text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">Full</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <input
-                      type="radio"
-                      name="plannerMode"
-                      checked={plannerMode === "fast"}
-                      onChange={() => handleModeChange("fast")}
-                      className="h-3.5 w-3.5 accent-[var(--color-primary)]"
-                    />
-                    <span className="font-medium text-foreground">Fast</span>
-                  </label>
-                </div>
+                    <span className="ml-1.5 text-[10px]">(required by parallel mode)</span>
+                  </p>
+                ) : (
+                  <div className="flex gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        type="radio"
+                        name="plannerMode"
+                        checked={plannerMode === "full"}
+                        onChange={() => handleModeChange("full")}
+                        className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+                      />
+                      <span className="font-medium text-foreground">Full</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        type="radio"
+                        name="plannerMode"
+                        checked={plannerMode === "fast"}
+                        onChange={() => handleModeChange("fast")}
+                        className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+                      />
+                      <span className="font-medium text-foreground">Fast</span>
+                    </label>
+                  </div>
+                )}
               </div>
               <div className="space-y-1">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Plan file path
                 </p>
-                <Input
-                  value={planPath}
-                  onChange={(e) => {
-                    userOverride.current = true;
-                    setPlanPath(e.target.value);
-                  }}
-                  placeholder={defaultPlanPath}
-                  className="h-7 text-xs"
-                />
-                <p className="text-[10px] text-muted-foreground/70">
-                  Preview — server may adjust based on project config
-                </p>
+                {isParallel ? (
+                  <>
+                    <p className="text-xs font-mono text-muted-foreground truncate">
+                      {effectivePlanPath}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Auto-generated per task (parallel mode)
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      value={planPath}
+                      onChange={(e) => {
+                        userOverride.current = true;
+                        setPlanPath(e.target.value);
+                      }}
+                      placeholder={defaultPlanPath}
+                      className="h-7 text-xs"
+                    />
+                    <p className="text-[10px] text-muted-foreground/70">
+                      Preview — server may adjust based on project config
+                    </p>
+                  </>
+                )}
               </div>
               <div className="flex gap-4">
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">

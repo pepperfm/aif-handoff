@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { Task } from "@aif/shared/browser";
 
+vi.mock("@/hooks/useProjects", () => ({
+  useProjects: () => ({ data: [{ id: "test-project", parallelEnabled: false }] }),
+}));
+
 const mockTask: Task = {
   id: "ts-1",
   projectId: "test-project",

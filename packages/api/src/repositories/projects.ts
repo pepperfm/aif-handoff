@@ -19,6 +19,7 @@ export function createProject(input: {
   planCheckerMaxBudgetUsd?: number | null;
   implementerMaxBudgetUsd?: number | null;
   reviewSidecarMaxBudgetUsd?: number | null;
+  parallelEnabled?: boolean;
 }): { project: ProjectRow | undefined; pathError?: string } {
   const pathError = validateProjectRootPath(input.rootPath);
   if (pathError) return { project: undefined, pathError };
@@ -46,6 +47,7 @@ export function updateProject(
     planCheckerMaxBudgetUsd?: number | null;
     implementerMaxBudgetUsd?: number | null;
     reviewSidecarMaxBudgetUsd?: number | null;
+    parallelEnabled?: boolean;
   },
 ): { project: ProjectRow | undefined; pathError?: string } {
   const pathError = validateProjectRootPath(input.rootPath);

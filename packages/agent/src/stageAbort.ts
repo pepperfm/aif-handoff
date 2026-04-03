@@ -1,14 +1,38 @@
 /**
- * Shared AbortController for the active coordinator stage.
- * Extracted to avoid circular dependency between coordinator and subagentQuery.
+ * Per-task AbortController registry for concurrent coordinator stages.
+ * Supports parallel task execution — each task gets its own controller.
  */
 
-let _activeAbort: AbortController | null = null;
+import { releaseTaskClaim } from "@aif/data";
 
-export function setActiveStageAbortController(abort: AbortController | null): void {
-  _activeAbort = abort;
+const _activeAborts = new Map<string, AbortController>();
+
+export function setActiveStageAbortController(taskId: string, abort: AbortController | null): void {
+  if (abort) {
+    _activeAborts.set(taskId, abort);
+  } else {
+    _activeAborts.delete(taskId);
+  }
 }
 
-export function getActiveStageAbortController(): AbortController | null {
-  return _activeAbort;
+export function getActiveStageAbortController(taskId?: string): AbortController | null {
+  if (taskId) return _activeAborts.get(taskId) ?? null;
+  // Backward compat: if only one active, return it
+  if (_activeAborts.size === 1) {
+    return _activeAborts.values().next().value ?? null;
+  }
+  return null;
+}
+
+/** Abort all active stages and release their locks (used during shutdown). */
+export function abortAllActiveStages(): void {
+  for (const [taskId, abort] of _activeAborts) {
+    if (!abort.signal.aborted) abort.abort();
+    try {
+      releaseTaskClaim(taskId);
+    } catch {
+      /* best-effort during shutdown */
+    }
+    _activeAborts.delete(taskId);
+  }
 }

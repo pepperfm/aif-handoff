@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, like, lte, min, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, like, lte, min, or, sql } from "drizzle-orm";
 import {
   generatePlanPath,
   getProjectConfig,
@@ -416,6 +416,7 @@ export function createProject(input: {
   planCheckerMaxBudgetUsd?: number | null;
   implementerMaxBudgetUsd?: number | null;
   reviewSidecarMaxBudgetUsd?: number | null;
+  parallelEnabled?: boolean;
 }): ProjectRow | undefined {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -429,6 +430,7 @@ export function createProject(input: {
       planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
       implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
       reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
+      parallelEnabled: input.parallelEnabled ?? false,
       createdAt: now,
       updatedAt: now,
     })
@@ -445,6 +447,7 @@ export function updateProject(
     planCheckerMaxBudgetUsd?: number | null;
     implementerMaxBudgetUsd?: number | null;
     reviewSidecarMaxBudgetUsd?: number | null;
+    parallelEnabled?: boolean;
   },
 ): ProjectRow | undefined {
   getDb()
@@ -456,6 +459,7 @@ export function updateProject(
       planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
       implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
       reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
+      parallelEnabled: input.parallelEnabled ?? false,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(projects.id, id))
@@ -493,6 +497,10 @@ export function persistTaskPlanForTask(input: {
 }
 
 export function findCoordinatorTaskCandidate(stage: CoordinatorStage): TaskRow | undefined {
+  return findCoordinatorTaskCandidates(stage, 1)[0];
+}
+
+export function findCoordinatorTaskCandidates(stage: CoordinatorStage, limit: number): TaskRow[] {
   const stageFilter =
     stage === "implementer"
       ? or(
@@ -505,13 +513,106 @@ export function findCoordinatorTaskCandidate(stage: CoordinatorStage): TaskRow |
           ? inArray(tasks.status, ["planning"])
           : inArray(tasks.status, ["review"]);
 
+  const nowIso = new Date().toISOString();
+
   return getDb()
     .select()
     .from(tasks)
-    .where(and(stageFilter, eq(tasks.paused, false)))
+    .where(and(
+      stageFilter,
+      eq(tasks.paused, false),
+      or(
+        sql`${tasks.lockedBy} IS NULL`,
+        lte(tasks.lockedUntil, nowIso),
+      ),
+    ))
     .orderBy(asc(tasks.position), asc(tasks.createdAt))
-    .limit(1)
+    .limit(limit)
+    .all();
+}
+
+/** Atomically claim a task for processing. Returns true if claim succeeded. */
+export function claimTask(taskId: string, coordinatorId: string, lockDurationMs: number): boolean {
+  const nowIso = new Date().toISOString();
+  const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
+
+  const result = getDb()
+    .update(tasks)
+    .set({ lockedBy: coordinatorId, lockedUntil })
+    .where(and(
+      eq(tasks.id, taskId),
+      or(
+        sql`${tasks.lockedBy} IS NULL`,
+        lte(tasks.lockedUntil, nowIso),
+      ),
+    ))
+    .run();
+
+  return result.changes > 0;
+}
+
+/** Check if any task in a project is currently locked (active, non-expired). */
+export function hasActiveLockedTaskForProject(projectId: string): boolean {
+  const nowIso = new Date().toISOString();
+  const row = getDb()
+    .select({ cnt: count() })
+    .from(tasks)
+    .where(and(
+      eq(tasks.projectId, projectId),
+      isNotNull(tasks.lockedBy),
+      gt(tasks.lockedUntil, nowIso),
+    ))
     .get();
+  return (row?.cnt ?? 0) > 0;
+}
+
+/** Extend lock expiry for a task owned by this coordinator. */
+export function renewTaskClaim(taskId: string, coordinatorId: string, lockDurationMs: number): void {
+  const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
+  getDb()
+    .update(tasks)
+    .set({ lockedUntil })
+    .where(and(eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)))
+    .run();
+}
+
+/** Release a task claim after processing completes. */
+export function releaseTaskClaim(taskId: string): void {
+  getDb()
+    .update(tasks)
+    .set({ lockedBy: null, lockedUntil: null })
+    .where(eq(tasks.id, taskId))
+    .run();
+}
+
+/** Release expired or abandoned task claims. Returns count of released claims. */
+export function releaseStaleTaskClaims(): number {
+  const nowIso = new Date().toISOString();
+  // Heartbeat older than 5 minutes means the process is dead
+  const heartbeatDeadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  const result = getDb()
+    .update(tasks)
+    .set({ lockedBy: null, lockedUntil: null })
+    .where(and(
+      isNotNull(tasks.lockedBy),
+      or(
+        // Lock TTL expired
+        lte(tasks.lockedUntil, nowIso),
+        // Process died: heartbeat stale, task still in-progress, and not freshly claimed
+        and(
+          inArray(tasks.status, ["planning", "implementing", "review"]),
+          // Ensure task was claimed at least 5 min ago (avoid race with fresh claims)
+          lte(tasks.updatedAt, heartbeatDeadline),
+          or(
+            sql`${tasks.lastHeartbeatAt} IS NULL`,
+            lte(tasks.lastHeartbeatAt, heartbeatDeadline),
+          ),
+        ),
+      ),
+    ))
+    .run();
+  return result.changes;
 }
 
 export function listDueBlockedExternalTasks(nowIso: string): TaskRow[] {
@@ -531,6 +632,7 @@ export function listDueBlockedExternalTasks(nowIso: string): TaskRow[] {
 }
 
 export function listStaleInProgressTasks(): TaskRow[] {
+  const nowIso = new Date().toISOString();
   return getDb()
     .select()
     .from(tasks)
@@ -538,6 +640,11 @@ export function listStaleInProgressTasks(): TaskRow[] {
       and(
         inArray(tasks.status, ["planning", "implementing", "review"]),
         eq(tasks.paused, false),
+        // Skip tasks with active (non-expired) locks — they're being processed
+        or(
+          sql`${tasks.lockedBy} IS NULL`,
+          lte(tasks.lockedUntil, nowIso),
+        ),
       ),
     )
     .all();

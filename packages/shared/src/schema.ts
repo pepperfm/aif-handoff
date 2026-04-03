@@ -12,6 +12,7 @@ export const projects = sqliteTable("projects", {
   planCheckerMaxBudgetUsd: real("plan_checker_max_budget_usd"),
   implementerMaxBudgetUsd: real("implementer_max_budget_usd"),
   reviewSidecarMaxBudgetUsd: real("review_sidecar_max_budget_usd"),
+  parallelEnabled: integer("parallel_enabled", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
@@ -63,6 +64,8 @@ export const tasks = sqliteTable("tasks", {
   lastHeartbeatAt: text("last_heartbeat_at"),
   lastSyncedAt: text("last_synced_at"),
   sessionId: text("session_id"),
+  lockedBy: text("locked_by"),
+  lockedUntil: text("locked_until"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),

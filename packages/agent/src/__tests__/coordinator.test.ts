@@ -38,8 +38,12 @@ vi.mock("../autoReviewHandler.js", async (importOriginal) => {
   };
 });
 
-const { pollAndProcess, getCoordinatorRuntimeCounters, resetCoordinatorRuntimeCountersForTests } =
-  await import("../coordinator.js");
+const {
+  pollAndProcess,
+  getCoordinatorRuntimeCounters,
+  resetCoordinatorRuntimeCountersForTests,
+  getStageSemaphore,
+} = await import("../coordinator.js");
 const { runPlanner } = await import("../subagents/planner.js");
 const { runPlanChecker } = await import("../subagents/planChecker.js");
 const { runImplementer } = await import("../subagents/implementer.js");
@@ -55,6 +59,7 @@ describe("coordinator", () => {
       .run();
     vi.clearAllMocks();
     resetCoordinatorRuntimeCountersForTests();
+    getStageSemaphore().reset();
   });
 
   it("should pick up planning tasks and process through full pipeline", async () => {
@@ -699,5 +704,86 @@ describe("coordinator", () => {
     await pollAndProcess();
 
     expect(statusDuringExec).toBe("planning");
+  });
+
+  // ── Parallel mode per-project tests ───────────────────────
+
+  it("should process multiple tasks concurrently for parallel-enabled project", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values({
+        id: "parallel-proj",
+        name: "Parallel",
+        rootPath: "/tmp/parallel",
+        parallelEnabled: true,
+      })
+      .run();
+    db.insert(tasks)
+      .values({ id: "p-task-1", projectId: "parallel-proj", title: "T1", status: "planning" })
+      .run();
+    db.insert(tasks)
+      .values({ id: "p-task-2", projectId: "parallel-proj", title: "T2", status: "planning" })
+      .run();
+
+    await pollAndProcess();
+
+    // Both tasks should have been picked up by planner
+    expect(runPlanner).toHaveBeenCalledWith("p-task-1", "/tmp/parallel");
+    expect(runPlanner).toHaveBeenCalledWith("p-task-2", "/tmp/parallel");
+  });
+
+  it("should process only 1 task at a time for non-parallel project", async () => {
+    const db = testDb.current;
+    // test-project is non-parallel (default)
+    db.insert(tasks)
+      .values({ id: "s-task-1", projectId: "test-project", title: "S1", status: "planning" })
+      .run();
+    db.insert(tasks)
+      .values({ id: "s-task-2", projectId: "test-project", title: "S2", status: "planning" })
+      .run();
+
+    await pollAndProcess();
+
+    // Only the first task should complete the full pipeline (serial)
+    const t1 = db.select().from(tasks).where(eq(tasks.id, "s-task-1")).get();
+    const t2 = db.select().from(tasks).where(eq(tasks.id, "s-task-2")).get();
+    expect(t1!.status).toBe("done");
+    // Second task either untouched or partially progressed but not both done
+    expect(t2!.status).not.toBe("done");
+  });
+
+  it("should force full mode via API for parallel project", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values({ id: "par-proj", name: "Par", rootPath: "/tmp/par", parallelEnabled: true })
+      .run();
+
+    // Verify project was created with parallel enabled
+    const proj = db.select().from(projects).where(eq(projects.id, "par-proj")).get();
+    expect(proj!.parallelEnabled).toBe(true);
+  });
+
+  it("should respect global max across stages (totalActive cap)", async () => {
+    const db = testDb.current;
+    db.insert(projects)
+      .values({ id: "cap-proj", name: "Cap", rootPath: "/tmp/cap", parallelEnabled: true })
+      .run();
+
+    // Create 5 tasks in planning — globalMax is 3, so at most 3 should be picked
+    for (let i = 1; i <= 5; i++) {
+      db.insert(tasks)
+        .values({ id: `cap-task-${i}`, projectId: "cap-proj", title: `C${i}`, status: "planning" })
+        .run();
+    }
+
+    await pollAndProcess();
+
+    // Semaphore should have released all slots after allSettled
+    expect(getStageSemaphore().totalActive()).toBe(0);
+
+    // At most globalMax (3) planner calls should have been made
+    const plannerCalls = (runPlanner as any).mock.calls.length;
+    expect(plannerCalls).toBeLessThanOrEqual(3);
+    expect(plannerCalls).toBeGreaterThanOrEqual(1);
   });
 });

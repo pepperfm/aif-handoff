@@ -48,6 +48,7 @@ function ensureTables(sqlite: Database.Database): void {
       plan_checker_max_budget_usd REAL,
       implementer_max_budget_usd REAL,
       review_sidecar_max_budget_usd REAL,
+      parallel_enabled INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
@@ -91,6 +92,8 @@ function ensureTables(sqlite: Database.Database): void {
       last_heartbeat_at TEXT,
       last_synced_at TEXT,
       session_id TEXT,
+      locked_by TEXT,
+      locked_until TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
@@ -175,6 +178,19 @@ const MIGRATIONS: Migration[] = [
     description: "Add attachments column to chat_messages",
     sql: "ALTER TABLE chat_messages ADD COLUMN attachments TEXT",
   },
+  {
+    version: 4,
+    description: "Add parallel_enabled column to projects",
+    sql: "ALTER TABLE projects ADD COLUMN parallel_enabled INTEGER NOT NULL DEFAULT 0",
+  },
+  {
+    version: 5,
+    description: "Add task locking columns for parallel execution",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN locked_by TEXT;
+      ALTER TABLE tasks ADD COLUMN locked_until TEXT;
+    `,
+  },
 ];
 
 function runMigrations(sqlite: Database.Database): void {
@@ -234,6 +250,8 @@ function ensureIndexes(sqlite: Database.Database): void {
     "CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status, position)",
     // Task comments lookup by task
     "CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id)",
+    // Task locking: find unlocked or stale-locked tasks
+    "CREATE INDEX IF NOT EXISTS idx_tasks_locked ON tasks(locked_by, locked_until)",
   ];
 
   for (const ddl of indexDefs) {
