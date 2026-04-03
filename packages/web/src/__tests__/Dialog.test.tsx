@@ -56,7 +56,9 @@ describe("Dialog", () => {
     render(<DialogHarness />);
 
     expect(screen.getByTestId("state").textContent).toBe("open");
-    const overlayContainer = document.querySelector(".fixed.inset-0.flex.items-center.justify-center.p-4") as HTMLElement | null;
+    const overlayContainer = document.querySelector(
+      ".fixed.inset-0.flex.items-start.justify-center",
+    ) as HTMLElement | null;
     expect(overlayContainer).toBeTruthy();
     fireEvent.mouseDown(overlayContainer!);
     expect(screen.getByTestId("state").textContent).toBe("closed");

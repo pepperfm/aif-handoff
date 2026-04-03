@@ -537,7 +537,7 @@ describe("TaskDetail", () => {
     });
 
     fireEvent.click(screen.getByText("Show attachments (0)"));
-    const fileInput = container.querySelector('input[type="file"][multiple]') as HTMLInputElement;
+    const fileInput = document.querySelector('input[type="file"][multiple]') as HTMLInputElement;
     const file = {
       name: "new.txt",
       type: "text/plain",
