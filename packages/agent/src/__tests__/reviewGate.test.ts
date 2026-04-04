@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { executeSubagentQueryMock } = vi.hoisted(() => ({
   executeSubagentQueryMock: vi.fn(),
@@ -11,6 +11,7 @@ vi.mock("../subagentQuery.js", () => ({
 import { evaluateReviewCommentsForAutoMode } from "../reviewGate.js";
 
 describe("evaluateReviewCommentsForAutoMode", () => {
+  const originalAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
   const baseInput = {
     taskId: "test-task-1",
     projectRoot: "/tmp/test-project",
@@ -19,6 +20,15 @@ describe("evaluateReviewCommentsForAutoMode", () => {
 
   beforeEach(() => {
     executeSubagentQueryMock.mockReset();
+    delete process.env.ANTHROPIC_BASE_URL;
+  });
+
+  afterAll(() => {
+    if (originalAnthropicBaseUrl == null) {
+      delete process.env.ANTHROPIC_BASE_URL;
+      return;
+    }
+    process.env.ANTHROPIC_BASE_URL = originalAnthropicBaseUrl;
   });
 
   it("returns success when agent responds with SUCCESS", async () => {
@@ -83,5 +93,36 @@ describe("evaluateReviewCommentsForAutoMode", () => {
 
     const result = await evaluateReviewCommentsForAutoMode(baseInput);
     expect(result).toEqual({ status: "success" });
+  });
+
+  it("passes haiku model when no Anthropic proxy base URL is configured", async () => {
+    executeSubagentQueryMock.mockResolvedValueOnce({ resultText: "SUCCESS" });
+
+    await evaluateReviewCommentsForAutoMode(baseInput);
+
+    expect(executeSubagentQueryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelOverride: "haiku",
+        workflowSpec: expect.objectContaining({
+          sessionReusePolicy: "never",
+        }),
+      }),
+    );
+  });
+
+  it("omits model override when Anthropic proxy base URL is configured", async () => {
+    process.env.ANTHROPIC_BASE_URL = "https://proxy.example/v1";
+    executeSubagentQueryMock.mockResolvedValueOnce({ resultText: "SUCCESS" });
+
+    await evaluateReviewCommentsForAutoMode(baseInput);
+
+    expect(executeSubagentQueryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelOverride: null,
+        workflowSpec: expect.objectContaining({
+          sessionReusePolicy: "never",
+        }),
+      }),
+    );
   });
 });

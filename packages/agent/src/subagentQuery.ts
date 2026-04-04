@@ -398,9 +398,19 @@ export async function executeSubagentQuery(
         : await adapter.run(runInput);
 
     const runtimeSessionId = result.sessionId ?? result.session?.id ?? null;
-    if (runtimeSessionId) {
+    if (runtimeSessionId && context.canResume) {
       saveTaskSessionId(taskId, runtimeSessionId);
       log.debug({ taskId, agentName, runtimeSessionId }, "Captured runtime session ID");
+    } else if (runtimeSessionId) {
+      log.debug(
+        {
+          taskId,
+          agentName,
+          runtimeSessionId,
+          sessionReusePolicy: context.workflow.sessionReusePolicy,
+        },
+        "Skipped runtime session persistence for non-resumable workflow",
+      );
     }
 
     if (result.usage) {

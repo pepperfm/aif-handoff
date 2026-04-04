@@ -4,6 +4,7 @@ const queryMock = vi.fn();
 const logActivityMock = vi.fn();
 const incrementTaskTokenUsageMock = vi.fn();
 const saveTaskSessionIdMock = vi.fn();
+const getTaskSessionIdMock = vi.fn(() => null);
 (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
   queryMock;
 
@@ -22,7 +23,7 @@ vi.mock("@aif/data", async (importOriginal) => {
     updateTaskHeartbeat: vi.fn(),
     renewTaskClaim: vi.fn(),
     saveTaskSessionId: saveTaskSessionIdMock,
-    getTaskSessionId: vi.fn(() => null),
+    getTaskSessionId: getTaskSessionIdMock,
     findTaskById: vi.fn(() => ({
       id: "task-1",
       projectId: "project-1",
@@ -119,6 +120,23 @@ function makeDelayedSuccess(delayMs: number, result: string) {
   };
 }
 
+function makeSuccessWithSession(sessionId: string, result: string) {
+  return async function* () {
+    yield {
+      type: "system",
+      subtype: "init",
+      session_id: sessionId,
+    };
+    yield {
+      type: "result",
+      subtype: "success",
+      result,
+      usage: {},
+      total_cost_usd: 0,
+    };
+  };
+}
+
 describe("executeSubagentQuery attribution", () => {
   beforeEach(() => {
     (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
@@ -127,6 +145,8 @@ describe("executeSubagentQuery attribution", () => {
     logActivityMock.mockReset();
     incrementTaskTokenUsageMock.mockReset();
     saveTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReturnValue(null);
   });
 
   it("passes empty attribution to suppress Co-Authored-By trailers", async () => {
@@ -173,6 +193,8 @@ describe("executeSubagentQuery query_start_timeout retry", () => {
     logActivityMock.mockReset();
     incrementTaskTokenUsageMock.mockReset();
     saveTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReturnValue(null);
   });
 
   it("retries once after query_start_timeout and succeeds on second attempt", async () => {
@@ -193,5 +215,52 @@ describe("executeSubagentQuery query_start_timeout retry", () => {
 
     await expect(executeSubagentQuery(baseOptions)).rejects.toThrow(/query_start_timeout/i);
     expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("executeSubagentQuery session persistence policy", () => {
+  beforeEach(() => {
+    (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
+      queryMock;
+    queryMock.mockReset();
+    logActivityMock.mockReset();
+    incrementTaskTokenUsageMock.mockReset();
+    saveTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReset();
+    getTaskSessionIdMock.mockReturnValue(null);
+  });
+
+  it("persists runtime session for resume_if_available workflows", async () => {
+    queryMock.mockImplementation(makeSuccessWithSession("session-impl-1", "done"));
+
+    await executeSubagentQuery({
+      taskId: "task-resume",
+      projectRoot: "/tmp/project",
+      agentName: "implement-coordinator",
+      prompt: "run",
+      workflowKind: "implementer",
+    });
+
+    expect(saveTaskSessionIdMock).toHaveBeenCalledWith("task-resume", "session-impl-1");
+  });
+
+  it("does not persist runtime session for new_session workflows", async () => {
+    queryMock.mockImplementation(makeSuccessWithSession("session-review-1", "done"));
+
+    await executeSubagentQuery({
+      taskId: "task-review",
+      projectRoot: "/tmp/project",
+      agentName: "review-sidecar",
+      prompt: "run",
+      workflowSpec: {
+        workflowKind: "reviewer",
+        promptInput: { prompt: "run" },
+        requiredCapabilities: [],
+        fallbackStrategy: "none",
+        sessionReusePolicy: "new_session",
+      },
+    });
+
+    expect(saveTaskSessionIdMock).not.toHaveBeenCalled();
   });
 });
