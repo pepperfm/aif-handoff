@@ -90,6 +90,7 @@ export interface RuntimeSessionListInput {
   runtimeId: string;
   providerId?: string;
   profileId?: string | null;
+  projectRoot?: string;
   limit?: number;
 }
 
@@ -97,6 +98,7 @@ export interface RuntimeSessionGetInput {
   runtimeId: string;
   providerId?: string;
   profileId?: string | null;
+  projectRoot?: string;
   sessionId: string;
 }
 
@@ -130,6 +132,7 @@ export interface RuntimeModelListInput {
   runtimeId: string;
   providerId?: string;
   profileId?: string | null;
+  projectRoot?: string;
 }
 
 export interface RuntimeAdapter {

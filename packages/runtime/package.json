@@ -17,7 +17,9 @@
     "lint": "eslint \"src/**/*.ts\"",
     "test:watch": "vitest"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.86"
+  },
   "devDependencies": {
     "typescript": "^5.9.3",
     "vitest": "^4.1.2"

@@ -26,10 +26,13 @@ export {
 
 export {
   RuntimeError,
+  RuntimeCapabilityError,
+  RuntimeExecutionError,
   RuntimeModuleLoadError,
   RuntimeModuleValidationError,
   RuntimeRegistrationError,
   RuntimeResolutionError,
+  RuntimeValidationError,
 } from "./errors.js";
 
 export {
@@ -39,3 +42,55 @@ export {
   type RuntimeRegistryLogger,
   type RuntimeRegistryOptions,
 } from "./registry.js";
+
+export {
+  assertRuntimeCapabilities,
+  checkRuntimeCapabilities,
+  type RuntimeCapabilityCheckInput,
+  type RuntimeCapabilityCheckResult,
+  type RuntimeCapabilityName,
+} from "./capabilities.js";
+
+export { createRuntimeMemoryCache, type RuntimeCache, type RuntimeCacheOptions } from "./cache.js";
+
+export {
+  createRuntimeModelDiscoveryService,
+  type RuntimeModelDiscoveryLogger,
+  type RuntimeModelDiscoveryOptions,
+  type RuntimeModelDiscoveryService,
+} from "./modelDiscovery.js";
+
+export {
+  redactResolvedRuntimeProfile,
+  resolveRuntimeProfile,
+  validateResolvedRuntimeProfile,
+  type ResolveRuntimeProfileInput,
+  type ResolvedRuntimeProfile,
+  type RuntimeProfileLike,
+  type RuntimeResolutionEnv,
+  type RuntimeResolutionLogger,
+  type RuntimeValidationResult,
+} from "./resolution.js";
+
+export {
+  resolveRuntimePromptPolicy,
+  type RuntimePromptPolicyInput,
+  type RuntimePromptPolicyLogger,
+  type RuntimePromptPolicyResult,
+} from "./promptPolicy.js";
+
+export {
+  createRuntimeWorkflowSpec,
+  type RuntimeSessionReusePolicy,
+  type RuntimeWorkflowFallbackStrategy,
+  type RuntimeWorkflowKind,
+  type RuntimeWorkflowPromptInput,
+  type RuntimeWorkflowSpec,
+  type RuntimeWorkflowSpecInput,
+} from "./workflowSpec.js";
+
+export {
+  createClaudeRuntimeAdapter,
+  type ClaudeRuntimeAdapterLogger,
+  type CreateClaudeRuntimeAdapterOptions,
+} from "./adapters/claude/index.js";

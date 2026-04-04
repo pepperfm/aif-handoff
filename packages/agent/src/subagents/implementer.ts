@@ -17,6 +17,7 @@ import {
   modelOption,
   getProjectConfig,
 } from "@aif/shared";
+import { createRuntimeWorkflowSpec } from "@aif/runtime";
 import { logActivity } from "../hooks.js";
 import { executeSubagentQuery } from "../subagentQuery.js";
 import { computePendingPlanLayers, computePlanLayers } from "../planLayers.js";
@@ -204,11 +205,13 @@ export async function runImplementer(taskId: string, projectRoot: string): Promi
   }
 
   log.info({ taskId, title: task.title, useSubagents }, "Starting implementation stage");
+  const scopeConstraint = `IMPORTANT: Your working directory is ${projectRoot}
+All files must be created and modified inside this directory. Do NOT create files outside of it.`;
+  const implementSlashCommand = `/aif-implement ${planSection}`;
 
-  const prompt = `${useSubagents ? "Implement the task using the provided plan." : `/aif-implement ${planSection}`}
+  const prompt = `${useSubagents ? "Implement the task using the provided plan." : implementSlashCommand}
 
-IMPORTANT: Your working directory is ${projectRoot}
-All files must be created and modified inside this directory. Do NOT create files outside of it.
+${scopeConstraint}
 
 Title: ${task.title}
 Description: ${task.description}
@@ -231,6 +234,20 @@ Execution rules:
 - Keep plan checklist state accurate while implementing.
 - Run tests/lint/verification relevant to the changes.
 - IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.`;
+  const workflowSpec = createRuntimeWorkflowSpec({
+    workflowKind: "implementer",
+    prompt,
+    requiredCapabilities: useSubagents ? ["supportsAgentDefinitions"] : [],
+    agentDefinitionName: useSubagents ? AGENT_NAME : undefined,
+    fallbackSlashCommand: implementSlashCommand,
+    fallbackStrategy: useSubagents ? "slash_command" : "none",
+    sessionReusePolicy: "resume_if_available",
+    systemPromptAppend: scopeConstraint,
+    metadata: {
+      reworkRequested: task.reworkRequested,
+      skipReview: task.skipReview ?? false,
+    },
+  });
 
   const { resultText } = await executeSubagentQuery({
     taskId,
@@ -240,6 +257,9 @@ Execution rules:
     maxBudgetUsd: implementerBudget,
     agent: useSubagents ? AGENT_NAME : undefined,
     skipReview: task.skipReview ?? false,
+    workflowSpec,
+    workflowKind: "implementer",
+    fallbackSlashCommand: implementSlashCommand,
   });
 
   let finalResultText = resultText;

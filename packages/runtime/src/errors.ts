@@ -35,3 +35,24 @@ export class RuntimeModuleLoadError extends RuntimeError {
     this.name = "RuntimeModuleLoadError";
   }
 }
+
+export class RuntimeValidationError extends RuntimeError {
+  constructor(message: string, cause?: unknown) {
+    super(message, "RUNTIME_VALIDATION_ERROR", cause);
+    this.name = "RuntimeValidationError";
+  }
+}
+
+export class RuntimeCapabilityError extends RuntimeError {
+  constructor(message: string, cause?: unknown) {
+    super(message, "RUNTIME_CAPABILITY_ERROR", cause);
+    this.name = "RuntimeCapabilityError";
+  }
+}
+
+export class RuntimeExecutionError extends RuntimeError {
+  constructor(message: string, cause?: unknown) {
+    super(message, "RUNTIME_EXECUTION_ERROR", cause);
+    this.name = "RuntimeExecutionError";
+  }
+}

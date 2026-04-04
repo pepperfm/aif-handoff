@@ -27,12 +27,20 @@ packages/
 │       ├── index.ts         # Public API (Node.js)
 │       └── browser.ts       # Public API (browser-safe subset)
 │
-├── runtime/             # @aif/runtime — runtime/provider abstraction module
+├── runtime/             # @aif/runtime — runtime/provider abstraction + adapter services
 │   └── src/
 │       ├── types.ts         # Runtime contracts (adapter/input/output/session/capabilities)
 │       ├── registry.ts      # Runtime registration + module loading
 │       ├── module.ts        # registerRuntimeModule export resolver
 │       ├── errors.ts        # Runtime domain errors
+│       ├── resolution.ts    # Runtime profile merge + env/auth resolution
+│       ├── capabilities.ts  # Capability gating helpers
+│       ├── modelDiscovery.ts # Model listing + connection validation service
+│       ├── cache.ts         # Shared runtime memory cache utility
+│       ├── workflowSpec.ts  # Runtime-independent workflow contract
+│       ├── promptPolicy.ts  # Agent-definition fallback policy
+│       ├── adapters/
+│       │   └── claude/      # Claude adapter (run, sessions, hooks, error mapping)
 │       └── index.ts         # Public runtime API
 │
 ├── data/                # @aif/data — centralized data-access module
@@ -63,6 +71,7 @@ packages/
     └── src/
         ├── index.ts         # Agent bootstrap
         ├── coordinator.ts   # Polling loop (node-cron, 30s interval)
+        ├── subagentQuery.ts # Runtime-aware execution bridge
         ├── hooks.ts         # Agent lifecycle hooks
         ├── notifier.ts      # Notification dispatch
         ├── claudeDiagnostics.ts  # Agent SDK health checks
@@ -111,7 +120,7 @@ agent ──→ runtime
 - **api/agent → runtime:** Runtime/provider selection and adapter execution via shared registry APIs
 - **data → shared:** Uses shared schema, DB helpers, and data contracts
 - **agent → api:** HTTP REST calls for WebSocket broadcasts (best-effort via notifier.ts)
-- **agent → Claude Agent SDK:** Spawns subagent processes using `.claude/agents/` definitions
+- **runtime:claude adapter → Claude Agent SDK:** Adapter executes queries/sessions while agent/api stay SDK-agnostic
 - **Shared types:** All modules import types and schemas from `@aif/shared`
 
 ## Key Principles
@@ -165,19 +174,42 @@ app.post("/", async (c) => {
 export default app;
 ```
 
-### Agent subagent launcher pattern
+### Agent runtime execution pattern
 
 ```typescript
-// packages/agent/src/subagents/planner.ts
-import { claude } from "@anthropic-ai/claude-agent-sdk";
+// packages/agent/src/subagentQuery.ts
+import {
+  assertRuntimeCapabilities,
+  createClaudeRuntimeAdapter,
+  createRuntimeRegistry,
+  createRuntimeWorkflowSpec,
+} from "@aif/runtime";
 
-export async function runPlanner(taskId: string, description: string) {
-  const session = await claude({
-    agent: "plan-coordinator", // references .claude/agents/plan-coordinator.md
-    settingSources: ["project"],
-    prompt: `Plan implementation for task ${taskId}: ${description}`,
+export async function executeRuntimeQuery(prompt: string) {
+  const registry = createRuntimeRegistry({
+    builtInAdapters: [createClaudeRuntimeAdapter()],
   });
-  return session;
+  const runtime = registry.resolveRuntime("claude");
+  const workflow = createRuntimeWorkflowSpec({
+    workflowKind: "planner",
+    prompt,
+    requiredCapabilities: ["supportsAgentDefinitions"],
+    agentDefinitionName: "plan-coordinator",
+  });
+
+  assertRuntimeCapabilities({
+    runtimeId: runtime.descriptor.id,
+    workflowKind: workflow.workflowKind,
+    capabilities: runtime.descriptor.capabilities,
+    required: workflow.requiredCapabilities,
+  });
+
+  return runtime.run({
+    runtimeId: runtime.descriptor.id,
+    providerId: runtime.descriptor.providerId,
+    workflowKind: workflow.workflowKind,
+    prompt: workflow.promptInput.prompt,
+  });
 }
 ```
 

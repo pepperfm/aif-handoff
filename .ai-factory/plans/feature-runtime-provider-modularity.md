@@ -64,10 +64,10 @@ Patterns and constraints to preserve:
 - [x] Task 1: Create the `@aif/runtime` workspace and module contract
 - [x] Task 2: Add neutral runtime/provider persistence, exports, and env support
 - [x] Task 3: Extend the data layer for runtime profiles and effective profile resolution
-- [ ] Task 4: Implement runtime profile resolution, validation, and capability gating
-- [ ] Task 5: Introduce a runtime-independent workflow spec layer
-- [ ] Task 6: Extract a full-parity `ClaudeRuntimeAdapter`
-- [ ] Task 7: Refactor the agent pipeline to run through the runtime registry
+- [x] Task 4: Implement runtime profile resolution, validation, and capability gating
+- [x] Task 5: Introduce a runtime-independent workflow spec layer
+- [x] Task 6: Extract a full-parity `ClaudeRuntimeAdapter`
+- [x] Task 7: Refactor the agent pipeline to run through the runtime registry
 - [ ] Task 8: Refactor chat, one-shot AI services, and readiness contracts to the shared runtime layer
 - [ ] Task 9: Add runtime profile CRUD, validation, and discovery endpoints
 - [ ] Task 10: Implement `CodexRuntimeAdapter` and prove the extension path
