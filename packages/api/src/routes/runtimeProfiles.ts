@@ -33,14 +33,35 @@ type UpdateRuntimeProfilePayload = z.infer<typeof updateRuntimeProfileSchema>;
 type RuntimeProfileValidationPayload = z.infer<typeof runtimeProfileValidationSchema>;
 type RuntimeProfileModelsPayload = z.infer<typeof runtimeProfileModelsSchema>;
 
-function hasSensitiveHeader(headers: Record<string, string> | undefined): boolean {
-  if (!headers) return false;
-  return Object.keys(headers).some((key) => {
+function listSensitiveHeaderKeys(headers: Record<string, string> | undefined): string[] {
+  if (!headers) return [];
+  return Object.keys(headers).filter((key) => {
     const lowered = key.toLowerCase();
     return (
-      lowered.includes("authorization") || lowered.includes("cookie") || lowered.includes("token")
+      lowered.includes("authorization") ||
+      lowered.includes("cookie") ||
+      lowered.includes("token") ||
+      lowered.includes("api-key") ||
+      lowered.includes("apikey") ||
+      lowered.includes("secret")
     );
   });
+}
+
+function inferApiKeyEnvVar(profile: {
+  runtimeId: string;
+  providerId: string;
+  apiKeyEnvVar?: string | null;
+}): string {
+  const explicitEnvVar = profile.apiKeyEnvVar?.trim();
+  if (explicitEnvVar) return explicitEnvVar;
+
+  const runtimeId = profile.runtimeId.toLowerCase();
+  const providerId = profile.providerId.toLowerCase();
+  if (runtimeId === "claude" || providerId === "anthropic") {
+    return "ANTHROPIC_API_KEY";
+  }
+  return "OPENAI_API_KEY";
 }
 
 function sanitizeBooleanQuery(value: string | undefined, fallback = false): boolean {
@@ -158,10 +179,20 @@ runtimeProfilesRouter.post(
   zValidator("json", createRuntimeProfileSchema as never),
   async (c) => {
     const body = c.req.valid("json") as CreateRuntimeProfilePayload;
-    if (hasSensitiveHeader(body.headers)) {
+    const sensitiveHeaderKeys = listSensitiveHeaderKeys(body.headers);
+    if (sensitiveHeaderKeys.length > 0) {
       log.warn(
-        { profileName: body.name, runtimeId: body.runtimeId },
-        "WARN [runtime-profile-route] Request contains sensitive-looking header keys",
+        { profileName: body.name, runtimeId: body.runtimeId, sensitiveHeaderKeys },
+        "WARN [runtime-profile-route] Rejected create request with sensitive header keys",
+      );
+      return c.json(
+        {
+          error: "Sensitive header keys are not allowed in persisted runtime profiles",
+          fieldErrors: {
+            headers: sensitiveHeaderKeys.map((key) => `Disallowed header key: ${key}`),
+          },
+        },
+        400,
       );
     }
 
@@ -184,10 +215,20 @@ runtimeProfilesRouter.put(
     const body = c.req.valid("json") as UpdateRuntimeProfilePayload;
     const existing = findRuntimeProfileById(id);
     if (!existing) return c.json({ error: "Runtime profile not found" }, 404);
-    if (hasSensitiveHeader(body.headers)) {
+    const sensitiveHeaderKeys = listSensitiveHeaderKeys(body.headers);
+    if (sensitiveHeaderKeys.length > 0) {
       log.warn(
-        { profileId: id, runtimeId: existing.runtimeId },
-        "WARN [runtime-profile-route] Update request contains sensitive-looking header keys",
+        { profileId: id, runtimeId: existing.runtimeId, sensitiveHeaderKeys },
+        "WARN [runtime-profile-route] Rejected update request with sensitive header keys",
+      );
+      return c.json(
+        {
+          error: "Sensitive header keys are not allowed in persisted runtime profiles",
+          fieldErrors: {
+            headers: sensitiveHeaderKeys.map((key) => `Disallowed header key: ${key}`),
+          },
+        },
+        400,
       );
     }
     const updated = updateRuntimeProfile(id, body);
@@ -269,7 +310,7 @@ runtimeProfilesRouter.post(
 
     const env = { ...process.env };
     if (body.apiKey) {
-      const envKey = resolvedInput.profile.apiKeyEnvVar ?? "OPENAI_API_KEY";
+      const envKey = inferApiKeyEnvVar(resolvedInput.profile);
       env[envKey] = body.apiKey;
       log.warn(
         { source: resolvedInput.source, envKey },
@@ -340,7 +381,7 @@ runtimeProfilesRouter.post(
 
     const env = { ...process.env };
     if (body.apiKey) {
-      const envKey = resolvedInput.profile.apiKeyEnvVar ?? "OPENAI_API_KEY";
+      const envKey = inferApiKeyEnvVar(resolvedInput.profile);
       env[envKey] = body.apiKey;
       log.warn(
         { source: resolvedInput.source, envKey },

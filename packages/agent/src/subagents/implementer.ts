@@ -1,4 +1,3 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -7,14 +6,12 @@ import {
   getLatestReworkComment,
   persistTaskPlanForTask,
   setTaskFields,
-  incrementTaskTokenUsage,
   type TaskRow,
 } from "@aif/data";
 import {
   logger,
   formatAttachmentsForPrompt,
   looksLikeFullPlanUpdate,
-  modelOption,
   getProjectConfig,
 } from "@aif/shared";
 import { createRuntimeWorkflowSpec } from "@aif/runtime";
@@ -96,7 +93,6 @@ async function runChecklistSyncQuery(input: {
   planText: string;
   implementationResult: string;
 }): Promise<string> {
-  let resultText = "";
   const prompt = `You are finalizing task checklist state in a markdown implementation plan.
 
 TASK TITLE:
@@ -121,36 +117,30 @@ Requirements:
 5) Output markdown only.
 6) Do not use tools or subagents.`;
 
-  for await (const message of query({
+  const workflowSpec = createRuntimeWorkflowSpec({
+    workflowKind: "implementer_checklist_sync",
     prompt,
-    options: {
-      cwd: input.projectRoot,
-      env: { ...process.env, HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.task.id },
-      settings: { attribution: { commit: "", pr: "" } },
-      settingSources: ["project"],
-      ...modelOption("haiku"),
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: "Do not use tools or subagents. Reply directly with markdown only.",
-      },
+    requiredCapabilities: [],
+    sessionReusePolicy: "never",
+    systemPromptAppend: "Do not use tools or subagents. Reply directly with markdown only.",
+    metadata: {
+      checklistSync: true,
     },
-  })) {
-    if (message.type !== "result") continue;
-    incrementTaskTokenUsage(input.task.id, {
-      ...message.usage,
-      total_cost_usd: message.total_cost_usd,
-    });
-    if (message.subtype !== "success") {
-      throw new Error(`Checklist sync failed: ${message.subtype}`);
-    }
-    resultText = message.result.trim();
-  }
+  });
 
-  if (!resultText) {
+  const { resultText } = await executeSubagentQuery({
+    taskId: input.task.id,
+    projectRoot: input.projectRoot,
+    agentName: "implement-checklist-sync",
+    prompt,
+    workflowSpec,
+    workflowKind: "implementer_checklist_sync",
+  });
+  const normalizedResult = resultText.trim();
+  if (!normalizedResult) {
     throw new Error("Checklist sync did not return plan markdown");
   }
-  return resultText;
+  return normalizedResult;
 }
 
 export async function runImplementer(taskId: string, projectRoot: string): Promise<void> {

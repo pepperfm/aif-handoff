@@ -7,7 +7,10 @@ const mockLog = {
   error: vi.fn(),
 };
 
-const mockGetEnv = vi.fn(() => ({ AGENT_BYPASS_PERMISSIONS: false }));
+const mockGetEnv = vi.fn(() => ({
+  AGENT_BYPASS_PERMISSIONS: false,
+  AIF_RUNTIME_MODULES: [] as string[],
+}));
 
 const mockCheckRuntimeCapabilities = vi.fn(() => ({ ok: true, missing: [] as string[] }));
 const mockCreateClaudeRuntimeAdapter = vi.fn();
@@ -15,8 +18,10 @@ const mockCreateCodexRuntimeAdapter = vi.fn();
 const mockCreateRuntimeMemoryCache = vi.fn((options: unknown) => ({ options }));
 const mockCreateRuntimeModelDiscoveryService = vi.fn(() => ({ kind: "discovery" }));
 const mockRegistryResolveRuntime = vi.fn();
+const mockRegistryRegisterRuntimeModule = vi.fn();
 const mockCreateRuntimeRegistry = vi.fn(() => ({
   resolveRuntime: mockRegistryResolveRuntime,
+  registerRuntimeModule: mockRegistryRegisterRuntimeModule,
 }));
 const mockCreateRuntimeWorkflowSpec = vi.fn(
   (input: {
@@ -136,8 +141,12 @@ describe("runtime service", () => {
       providerId: "anthropic",
     });
     mockResolveRuntimeProfile.mockReturnValue(createResolvedProfile());
-    mockGetEnv.mockReturnValue({ AGENT_BYPASS_PERMISSIONS: false });
+    mockGetEnv.mockReturnValue({
+      AGENT_BYPASS_PERMISSIONS: false,
+      AIF_RUNTIME_MODULES: [],
+    });
     mockCheckRuntimeCapabilities.mockReturnValue({ ok: true, missing: [] });
+    mockRegistryRegisterRuntimeModule.mockReset();
   });
 
   it("caches runtime registry and registers built-in adapters once", async () => {
@@ -150,6 +159,20 @@ describe("runtime service", () => {
     expect(mockCreateRuntimeRegistry).toHaveBeenCalledTimes(1);
     expect(mockCreateClaudeRuntimeAdapter).toHaveBeenCalledTimes(1);
     expect(mockCreateCodexRuntimeAdapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads runtime modules configured via AIF_RUNTIME_MODULES", async () => {
+    mockGetEnv.mockReturnValue({
+      AGENT_BYPASS_PERMISSIONS: false,
+      AIF_RUNTIME_MODULES: ["@org/runtime-a", "file:///runtime-b.mjs"],
+    });
+    const runtimeService = await loadRuntimeService();
+
+    await runtimeService.getApiRuntimeRegistry();
+
+    expect(mockRegistryRegisterRuntimeModule).toHaveBeenCalledTimes(2);
+    expect(mockRegistryRegisterRuntimeModule).toHaveBeenNthCalledWith(1, "@org/runtime-a");
+    expect(mockRegistryRegisterRuntimeModule).toHaveBeenNthCalledWith(2, "file:///runtime-b.mjs");
   });
 
   it("caches model discovery service with configured TTL caches", async () => {
@@ -373,7 +396,7 @@ describe("runtime service", () => {
     const runtimeService = await loadRuntimeService();
     const adapter = createAdapter();
     mockRegistryResolveRuntime.mockReturnValue(adapter);
-    mockGetEnv.mockReturnValue({ AGENT_BYPASS_PERMISSIONS: true });
+    mockGetEnv.mockReturnValue({ AGENT_BYPASS_PERMISSIONS: true, AIF_RUNTIME_MODULES: [] });
 
     await runtimeService.runApiRuntimeOneShot({
       projectId: "proj-1",

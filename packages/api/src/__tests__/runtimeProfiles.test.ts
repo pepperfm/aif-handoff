@@ -119,7 +119,7 @@ describe("runtimeProfiles API", () => {
     expect(missingRes.status).toBe(404);
   });
 
-  it("accepts create/update requests with sensitive-looking header keys", async () => {
+  it("rejects create/update requests with sensitive-looking header keys", async () => {
     const createRes = await app.request("/runtime-profiles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -130,17 +130,28 @@ describe("runtimeProfiles API", () => {
         headers: { Authorization: "Bearer temp" },
       }),
     });
-    expect(createRes.status).toBe(201);
-    const created = await createRes.json();
+    expect(createRes.status).toBe(400);
 
-    const updateRes = await app.request(`/runtime-profiles/${created.id}`, {
+    const safeCreateRes = await app.request("/runtime-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Safe Headers",
+        runtimeId: "claude",
+        providerId: "anthropic",
+      }),
+    });
+    expect(safeCreateRes.status).toBe(201);
+    const safeProfile = await safeCreateRes.json();
+
+    const updateRes = await app.request(`/runtime-profiles/${safeProfile.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         headers: { "x-api-token": "masked" },
       }),
     });
-    expect(updateRes.status).toBe(200);
+    expect(updateRes.status).toBe(400);
   });
 
   it("lists project + global profiles", async () => {
@@ -387,6 +398,9 @@ describe("runtimeProfiles API", () => {
     expect(res.status).toBe(200);
     expect(mockValidateConnection).toHaveBeenCalledTimes(1);
     expect(mockValidateConnection.mock.calls[0]?.[1]).toBe(false);
+    const [resolvedProfile] = mockValidateConnection.mock.calls[0] ?? [];
+    expect(resolvedProfile.apiKeyEnvVar).toBe("ANTHROPIC_API_KEY");
+    expect(resolvedProfile.apiKey).toBe("temporary-secret");
   });
 
   it("returns 400 for project-based validation when no effective profile exists", async () => {
@@ -417,5 +431,8 @@ describe("runtimeProfiles API", () => {
 
     expect(res.status).toBe(200);
     expect(mockListModels).toHaveBeenCalledTimes(1);
+    const [resolvedProfile] = mockListModels.mock.calls[0] ?? [];
+    expect(resolvedProfile.apiKeyEnvVar).toBe("ANTHROPIC_API_KEY");
+    expect(resolvedProfile.apiKey).toBe("tmp-key");
   });
 });

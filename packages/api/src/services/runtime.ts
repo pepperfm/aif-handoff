@@ -48,9 +48,27 @@ function buildRuntimeRegistry(): RuntimeRegistry {
   });
 }
 
+async function buildRuntimeRegistryWithModules(): Promise<RuntimeRegistry> {
+  const env = getEnv();
+  const registry = buildRuntimeRegistry();
+
+  for (const moduleSpecifier of env.AIF_RUNTIME_MODULES ?? []) {
+    try {
+      await registry.registerRuntimeModule(moduleSpecifier);
+    } catch (error) {
+      log.warn(
+        { moduleSpecifier, error },
+        "Runtime module failed to load for API runtime registry; continuing with built-ins",
+      );
+    }
+  }
+
+  return registry;
+}
+
 export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
   if (!runtimeRegistryPromise) {
-    runtimeRegistryPromise = Promise.resolve(buildRuntimeRegistry());
+    runtimeRegistryPromise = buildRuntimeRegistryWithModules();
   }
   return runtimeRegistryPromise;
 }
