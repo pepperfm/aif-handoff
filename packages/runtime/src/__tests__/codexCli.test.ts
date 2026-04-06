@@ -68,7 +68,7 @@ describe("codex cli transport", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const [cliPath, args] = spawnMock.mock.calls[0] as [string, string[]];
     expect(cliPath).toBe("codex");
-    expect(args).toEqual(["run", "--json"]);
+    expect(args).toEqual(["exec", "--json"]);
     expect(child.stdin.write).toHaveBeenCalledWith("Implement feature");
 
     child.stdout.emit("data", "plain output");

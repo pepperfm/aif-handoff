@@ -28,7 +28,7 @@ function readStringArray(value: unknown): string[] | null {
 function normalizeCliArgs(input: RuntimeRunInput): string[] {
   const options = asRecord(input.options);
   const configured = readStringArray(options.codexCliArgs);
-  const args = configured ?? ["run", "--json"];
+  const args = configured ?? ["exec", "--json"];
 
   return args.map((arg) => {
     if (arg.includes("{prompt}")) return arg.replaceAll("{prompt}", input.prompt);
@@ -87,62 +87,118 @@ function resolveTimeoutMs(input: RuntimeRunInput): number {
   return 120_000;
 }
 
+/**
+ * Parse JSONL output from `codex exec --json`.
+ * Each line is a JSON event. We extract the final agent message text,
+ * session/thread ID, and usage from relevant events.
+ *
+ * Falls back to single-JSON parsing for backwards compat with older CLI versions.
+ */
 function parseCliResult(stdout: string, fallbackSessionId: string | null): RuntimeRunResult {
   const trimmed = stdout.trim();
   if (!trimmed) {
-    return {
-      outputText: "",
-      sessionId: fallbackSessionId,
-    };
+    return { outputText: "", sessionId: fallbackSessionId };
   }
 
-  try {
-    const parsed = JSON.parse(trimmed) as {
-      outputText?: string;
-      result?: string;
-      sessionId?: string | null;
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-        costUsd?: number;
-      };
-      events?: Array<{
-        type: string;
-        timestamp?: string;
-        message?: string;
-        data?: Record<string, unknown>;
-      }>;
-    };
+  const lines = trimmed.split("\n").filter((l) => l.trim().length > 0);
+  const events: Array<Record<string, unknown>> = [];
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      // non-JSON line — skip
+    }
+  }
 
+  // No parseable events — try single JSON blob (backwards compat)
+  if (events.length === 0) {
+    return { outputText: trimmed, sessionId: fallbackSessionId, raw: trimmed };
+  }
+
+  // Single JSON object (old format) — handle directly
+  if (events.length === 1 && (events[0].outputText || events[0].result)) {
+    const parsed = events[0];
+    const usage = parsed.usage as Record<string, number> | undefined;
     return {
-      outputText: parsed.outputText ?? parsed.result ?? "",
-      sessionId: parsed.sessionId ?? fallbackSessionId,
-      usage: parsed.usage
+      outputText: String(parsed.outputText ?? parsed.result ?? ""),
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : fallbackSessionId,
+      usage: usage
         ? {
-            inputTokens: parsed.usage.inputTokens ?? 0,
-            outputTokens: parsed.usage.outputTokens ?? 0,
+            inputTokens: usage.inputTokens ?? usage.input_tokens ?? 0,
+            outputTokens: usage.outputTokens ?? usage.output_tokens ?? 0,
             totalTokens:
-              parsed.usage.totalTokens ??
-              (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0),
-            costUsd: parsed.usage.costUsd,
+              usage.totalTokens ??
+              usage.total_tokens ??
+              (usage.inputTokens ?? usage.input_tokens ?? 0) +
+                (usage.outputTokens ?? usage.output_tokens ?? 0),
+            costUsd: usage.costUsd ?? usage.cost_usd,
           }
         : undefined,
-      events: parsed.events?.map((event) => ({
-        type: event.type,
-        timestamp: event.timestamp ?? new Date().toISOString(),
-        message: event.message,
-        data: event.data,
-      })),
+      events: Array.isArray(parsed.events)
+        ? (parsed.events as Array<Record<string, unknown>>).map((e) => ({
+            type: String(e.type ?? "unknown"),
+            timestamp: typeof e.timestamp === "string" ? e.timestamp : new Date().toISOString(),
+            message: typeof e.message === "string" ? e.message : undefined,
+            data: e.data as Record<string, unknown> | undefined,
+          }))
+        : undefined,
       raw: parsed,
     };
-  } catch {
-    return {
-      outputText: trimmed,
-      sessionId: fallbackSessionId,
-      raw: trimmed,
-    };
   }
+
+  // JSONL events stream — extract output text, session ID, and usage
+  let outputText = "";
+  let sessionId = fallbackSessionId;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd: number | undefined;
+
+  for (const event of events) {
+    const type = String(event.type ?? "");
+
+    // Thread/session started
+    if (type === "thread.started" && typeof event.thread_id === "string") {
+      sessionId = event.thread_id;
+    }
+
+    // Agent message completed — collect text
+    if (type === "item.completed") {
+      const item = event.item as Record<string, unknown> | undefined;
+      if (item?.type === "agent_message" && typeof item.text === "string") {
+        if (outputText) outputText += "\n\n";
+        outputText += item.text;
+      }
+    }
+
+    // Turn completed — collect usage
+    if (type === "turn.completed") {
+      const usage = event.usage as Record<string, number> | undefined;
+      if (usage) {
+        inputTokens += usage.input_tokens ?? 0;
+        outputTokens += usage.output_tokens ?? 0;
+      }
+    }
+
+    // Message event with text (alternative format)
+    if (type === "message" && typeof event.text === "string") {
+      if (outputText) outputText += "\n\n";
+      outputText += event.text;
+    }
+  }
+
+  const totalTokens = inputTokens + outputTokens;
+  return {
+    outputText,
+    sessionId,
+    usage: totalTokens > 0 ? { inputTokens, outputTokens, totalTokens, costUsd } : undefined,
+    events: events.map((e) => ({
+      type: String(e.type ?? "unknown"),
+      timestamp: typeof e.timestamp === "string" ? e.timestamp : new Date().toISOString(),
+      message: typeof e.message === "string" ? e.message : undefined,
+      data: e,
+    })),
+    raw: events,
+  };
 }
 
 function shouldWritePromptToStdin(args: string[]): boolean {
