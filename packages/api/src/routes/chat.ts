@@ -804,10 +804,22 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       },
     };
 
+    const chatCapsForResume = resolveAdapterCapabilities(
+      adapter,
+      runtimeContext.resolvedProfile.transport,
+    );
+    const canResume =
+      Boolean(resumeRuntimeSessionId) &&
+      chatCapsForResume.supportsResume &&
+      Boolean(adapter.resume);
     const result =
-      resumeRuntimeSessionId && adapter.resume
-        ? await adapter.resume({ ...runInput, sessionId: resumeRuntimeSessionId })
-        : await adapter.run(runInput);
+      canResume && adapter.resume
+        ? await adapter.resume({ ...runInput, sessionId: resumeRuntimeSessionId! })
+        : await adapter.run({
+            ...runInput,
+            sessionId: undefined,
+            resume: false,
+          });
 
     const chatCaps = resolveAdapterCapabilities(adapter, runtimeContext.resolvedProfile.transport);
     const runtimeSessionId = getResultSessionId(result, chatCaps) ?? resumeRuntimeSessionId ?? null;

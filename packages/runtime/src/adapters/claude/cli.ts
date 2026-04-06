@@ -304,6 +304,10 @@ export async function runClaudeCli(
       }
     });
 
+    // Prompt is passed via -p flag, close stdin immediately to prevent
+    // "no stdin data received" warnings from the CLI.
+    child.stdin.end();
+
     // If abort is requested, kill the child
     if (execution?.abortController) {
       execution.abortController.signal.addEventListener(
