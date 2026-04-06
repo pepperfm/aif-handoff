@@ -4,12 +4,18 @@ import { initCodexProject } from "./project.js";
 import {
   RuntimeTransport,
   type RuntimeAdapter,
+  type RuntimeCapabilities,
   type RuntimeConnectionValidationInput,
   type RuntimeConnectionValidationResult,
   type RuntimeModel,
   type RuntimeModelListInput,
   type RuntimeRunInput,
   type RuntimeRunResult,
+  type RuntimeSessionListInput,
+  type RuntimeSessionGetInput,
+  type RuntimeSessionEventsInput,
+  type RuntimeSession,
+  type RuntimeEvent,
 } from "../../types.js";
 import { runCodexCli, type CodexCliLogger } from "./cli.js";
 import {
@@ -18,9 +24,11 @@ import {
   validateCodexAgentApiConnection,
   type CodexAgentApiLogger,
 } from "./api.js";
+import { runCodexSdk, type CodexSdkLogger } from "./sdk.js";
+import { listCodexSdkSessions, getCodexSdkSession, listCodexSdkSessionEvents } from "./sessions.js";
 import { classifyCodexRuntimeError } from "./errors.js";
 
-export type CodexRuntimeAdapterLogger = CodexCliLogger & CodexAgentApiLogger;
+export type CodexRuntimeAdapterLogger = CodexCliLogger & CodexAgentApiLogger & CodexSdkLogger;
 
 export interface CreateCodexRuntimeAdapterOptions {
   runtimeId?: string;
@@ -62,20 +70,63 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+// ---------------------------------------------------------------------------
+// Transport resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Capabilities differ by transport. CLI is the lowest-common-denominator;
+ * SDK adds resume and session list; API capabilities depend on the remote.
+ */
+
+const CLI_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: false,
+  supportsSessionList: false,
+  supportsAgentDefinitions: false,
+  supportsStreaming: true,
+  supportsModelDiscovery: true,
+  supportsApprovals: false,
+  supportsCustomEndpoint: true,
+};
+
+const SDK_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: true,
+  supportsSessionList: true,
+  supportsAgentDefinitions: false,
+  supportsStreaming: true,
+  supportsModelDiscovery: true,
+  supportsApprovals: false,
+  supportsCustomEndpoint: true,
+};
+
+const API_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: false,
+  supportsSessionList: false,
+  supportsAgentDefinitions: false,
+  supportsStreaming: true,
+  supportsModelDiscovery: true,
+  supportsApprovals: false,
+  supportsCustomEndpoint: true,
+};
+
 function resolveTransport(input: {
   transport?: string;
   options?: Record<string, unknown>;
-}): typeof RuntimeTransport.CLI | typeof RuntimeTransport.API {
+}): RuntimeTransport {
   const requested = readString(input.transport) ?? readString(asRecord(input.options).transport);
-  return requested === RuntimeTransport.API || requested === "agentapi"
-    ? RuntimeTransport.API
-    : RuntimeTransport.CLI;
+  if (requested === RuntimeTransport.SDK) return RuntimeTransport.SDK;
+  if (requested === RuntimeTransport.API || requested === "agentapi") return RuntimeTransport.API;
+  return RuntimeTransport.CLI;
 }
 
 function resolveCliPath(input: RuntimeConnectionValidationInput): string | null {
   const options = asRecord(input.options);
   return readString(options.codexCliPath) ?? readString(process.env.CODEX_CLI_PATH) ?? "codex";
 }
+
+// ---------------------------------------------------------------------------
+// Connection validation per transport
+// ---------------------------------------------------------------------------
 
 async function validateCodexCliConnection(
   input: RuntimeConnectionValidationInput,
@@ -88,7 +139,6 @@ async function validateCodexCliConnection(
     };
   }
 
-  // If an absolute/relative path is passed, verify that file exists.
   const looksLikePath = cliPath.includes("/") || cliPath.includes("\\");
   if (looksLikePath && !existsSync(cliPath)) {
     return {
@@ -102,6 +152,34 @@ async function validateCodexCliConnection(
     message: `Codex CLI is configured (${cliPath})`,
   };
 }
+
+async function validateCodexSdkConnection(
+  input: RuntimeConnectionValidationInput,
+): Promise<RuntimeConnectionValidationResult> {
+  const options = asRecord(input.options);
+
+  // SDK wraps the CLI — check CLI availability.
+  // Auth is handled by the CLI itself (via `codex auth login` or env vars),
+  // same as Claude SDK uses `claude /login` — no explicit API key required.
+  const cliPath =
+    readString(options.codexCliPath) ?? readString(process.env.CODEX_CLI_PATH) ?? "codex";
+  const looksLikePath = cliPath.includes("/") || cliPath.includes("\\");
+  if (looksLikePath && !existsSync(cliPath)) {
+    return {
+      ok: false,
+      message: `Codex SDK requires the CLI. Path does not exist: ${cliPath}`,
+    };
+  }
+
+  return {
+    ok: true,
+    message: `Codex SDK is configured (CLI: ${cliPath})`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Adapter factory
+// ---------------------------------------------------------------------------
 
 export function createCodexRuntimeAdapter(
   options: CreateCodexRuntimeAdapterOptions = {},
@@ -121,6 +199,10 @@ export function createCodexRuntimeAdapter(
       "INFO [runtime:codex] Selected transport",
     );
 
+    if (transport === RuntimeTransport.SDK) {
+      return runCodexSdk(input, logger);
+    }
+
     if (transport === RuntimeTransport.API) {
       return runCodexAgentApi({ ...input, transport }, logger);
     }
@@ -136,18 +218,22 @@ export function createCodexRuntimeAdapter(
       lightModel: null,
       defaultApiKeyEnvVar: "OPENAI_API_KEY",
       defaultModelPlaceholder: "gpt-5.4",
-      supportedTransports: [RuntimeTransport.CLI, RuntimeTransport.API],
+      supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
       defaultTransport: RuntimeTransport.CLI,
-      capabilities: {
-        supportsResume: false,
-        supportsSessionList: false,
-        supportsAgentDefinitions: false,
-        supportsStreaming: true,
-        supportsModelDiscovery: true,
-        supportsApprovals: false,
-        supportsCustomEndpoint: true,
-      },
+      capabilities: CLI_CAPABILITIES,
     },
+
+    getEffectiveCapabilities(transport: RuntimeTransport): RuntimeCapabilities {
+      switch (transport) {
+        case RuntimeTransport.SDK:
+          return SDK_CAPABILITIES;
+        case RuntimeTransport.API:
+          return API_CAPABILITIES;
+        default:
+          return CLI_CAPABILITIES;
+      }
+    },
+
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
       try {
         return await runByTransport(input);
@@ -155,6 +241,7 @@ export function createCodexRuntimeAdapter(
         throw classifyCodexRuntimeError(error);
       }
     },
+
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
       try {
         return await runByTransport({ ...input, resume: true });
@@ -162,6 +249,19 @@ export function createCodexRuntimeAdapter(
         throw classifyCodexRuntimeError(error);
       }
     },
+
+    async listSessions(input: RuntimeSessionListInput): Promise<RuntimeSession[]> {
+      return listCodexSdkSessions(input);
+    },
+
+    async getSession(input: RuntimeSessionGetInput): Promise<RuntimeSession | null> {
+      return getCodexSdkSession(input);
+    },
+
+    async listSessionEvents(input: RuntimeSessionEventsInput): Promise<RuntimeEvent[]> {
+      return listCodexSdkSessionEvents(input);
+    },
+
     async validateConnection(
       input: RuntimeConnectionValidationInput,
     ): Promise<RuntimeConnectionValidationResult> {
@@ -170,14 +270,21 @@ export function createCodexRuntimeAdapter(
         rawTransport &&
         rawTransport !== RuntimeTransport.CLI &&
         rawTransport !== RuntimeTransport.API &&
+        rawTransport !== RuntimeTransport.SDK &&
         rawTransport !== "agentapi"
       ) {
         return {
           ok: false,
-          message: `Codex does not support "${rawTransport}" transport. Use "cli" or "api".`,
+          message: `Codex does not support "${rawTransport}" transport. Use "sdk", "cli", or "api".`,
         };
       }
+
       const transport = resolveTransport({ transport: input.transport, options: input.options });
+
+      if (transport === RuntimeTransport.SDK) {
+        return validateCodexSdkConnection(input);
+      }
+
       if (transport === RuntimeTransport.API) {
         const issues: string[] = [];
         const options = asRecord(input.options);
@@ -200,8 +307,10 @@ export function createCodexRuntimeAdapter(
         }
         return validateCodexAgentApiConnection({ ...input, transport });
       }
+
       return validateCodexCliConnection({ ...input, transport });
     },
+
     async listModels(input: RuntimeModelListInput): Promise<RuntimeModel[]> {
       const options = asRecord(input);
       const transport = resolveTransport({ transport: undefined, options });
@@ -239,9 +348,11 @@ export function createCodexRuntimeAdapter(
       );
       return DEFAULT_CODEX_MODELS;
     },
+
     initProject(projectRoot) {
       initCodexProject(projectRoot);
     },
+
     async getMcpStatus(input) {
       return getCodexMcpStatus(input);
     },

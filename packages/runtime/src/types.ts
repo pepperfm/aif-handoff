@@ -96,6 +96,8 @@ export interface RuntimeExecutionIntent {
   onSubagentStart?: RuntimeSubagentStartCallback;
   /** Whether to bypass runtime permission checks (requires trust token in hooks). */
   bypassPermissions?: boolean;
+  /** JSON Schema for structured output — adapter passes it to the provider if supported. */
+  outputSchema?: Record<string, unknown>;
   /** Opaque adapter-specific hooks — passed through to the adapter without interpretation. */
   hooks?: Record<string, unknown>;
 }
@@ -280,6 +282,14 @@ export interface RuntimeAdapter {
   /** Execute a prompt. This is the only required method. */
   run(input: RuntimeRunInput): Promise<RuntimeRunResult>;
 
+  /**
+   * Return effective capabilities for a specific transport.
+   * Adapters that support multiple transports with differing capabilities
+   * implement this to let the system know what's available per transport.
+   * Falls back to `descriptor.capabilities` when not implemented.
+   */
+  getEffectiveCapabilities?(transport: RuntimeTransport): RuntimeCapabilities;
+
   // --- Session management (optional, capabilities-gated) ---
 
   /** Resume an existing session. Gate: supportsResume. */
@@ -318,4 +328,22 @@ export interface RuntimeAdapter {
   installMcpServer?(input: RuntimeMcpInstallInput): Promise<void>;
   /** Remove an MCP server from this runtime's config. */
   uninstallMcpServer?(input: RuntimeMcpInput): Promise<void>;
+}
+
+/**
+ * Get effective capabilities for an adapter, optionally for a specific transport.
+ *
+ * Adapters that support multiple transports with different capability sets
+ * implement `getEffectiveCapabilities(transport)`. When transport is provided
+ * and the adapter implements the method, it returns transport-specific capabilities.
+ * Otherwise falls back to the static `descriptor.capabilities`.
+ */
+export function resolveAdapterCapabilities(
+  adapter: RuntimeAdapter,
+  transport?: RuntimeTransport,
+): RuntimeCapabilities {
+  if (transport && adapter.getEffectiveCapabilities) {
+    return adapter.getEffectiveCapabilities(transport);
+  }
+  return adapter.descriptor.capabilities;
 }

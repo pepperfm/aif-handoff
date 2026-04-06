@@ -13,14 +13,17 @@ import {
   createRuntimeWorkflowSpec,
   getResultSessionId,
   redactResolvedRuntimeProfile,
+  resolveAdapterCapabilities,
   resolveRuntimeProfile,
   resolveRuntimePromptPolicy,
   RUNTIME_TRUST_TOKEN,
   type RuntimeAdapter,
+  type RuntimeCapabilities,
   type RuntimeCapabilityName,
   type RuntimeRegistry,
   type RuntimeRegistryLogger,
   type RuntimeSessionReusePolicy,
+  type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
@@ -164,6 +167,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   runtimeId: string;
   providerId: string;
   profileId: string | null;
+  transport: RuntimeTransport;
+  capabilities: RuntimeCapabilities;
   model: string | null;
   headers: Record<string, string>;
   options: Record<string, unknown>;
@@ -211,10 +216,14 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   const registry = await getRuntimeRegistry();
   const adapter = registry.resolveRuntime(resolved.runtimeId);
 
+  // Use transport-aware capabilities — adapters like Codex expose different
+  // capabilities depending on the active transport (SDK vs CLI vs API).
+  const capabilities = resolveAdapterCapabilities(adapter, resolved.transport);
+
   assertRuntimeCapabilities({
     runtimeId: resolved.runtimeId,
     workflowKind: workflow.workflowKind,
-    capabilities: adapter.descriptor.capabilities,
+    capabilities,
     required: workflow.requiredCapabilities,
     logger: {
       debug(context, message) {
@@ -228,7 +237,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
 
   const promptPolicy = resolveRuntimePromptPolicy({
     runtimeId: resolved.runtimeId,
-    capabilities: adapter.descriptor.capabilities,
+    capabilities,
     workflow,
     logger: {
       debug(context, message) {
@@ -241,8 +250,7 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   });
 
   const canResume =
-    workflow.sessionReusePolicy === "resume_if_available" &&
-    adapter.descriptor.capabilities.supportsResume;
+    workflow.sessionReusePolicy === "resume_if_available" && capabilities.supportsResume;
 
   const profileLogContext = redactResolvedRuntimeProfile(resolved);
   log.info(
@@ -273,6 +281,8 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
     runtimeId: resolved.runtimeId,
     providerId: resolved.providerId,
     profileId: resolved.profileId,
+    transport: resolved.transport,
+    capabilities,
     model: resolved.model,
     headers: resolved.headers,
     options: {
@@ -389,6 +399,7 @@ export async function executeSubagentQuery(
       providerId: context.providerId,
       profileId: context.profileId,
       workflowKind: context.workflow.workflowKind,
+      transport: context.transport,
       prompt: context.prompt,
       model: context.model ?? undefined,
       sessionId: existingSessionId,
@@ -405,7 +416,7 @@ export async function executeSubagentQuery(
         ? await adapter.resume({ ...runInput, sessionId: existingSessionId as string })
         : await adapter.run(runInput);
 
-    const runtimeSessionId = getResultSessionId(result, adapter.descriptor.capabilities);
+    const runtimeSessionId = getResultSessionId(result, context.capabilities);
     if (runtimeSessionId && context.canResume) {
       saveTaskSessionId(taskId, runtimeSessionId);
       log.debug({ taskId, agentName, runtimeSessionId }, "Captured runtime session ID");

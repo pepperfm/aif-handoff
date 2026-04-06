@@ -2,6 +2,7 @@ import { findClaudePath } from "./findPath.js";
 import {
   RuntimeTransport,
   type RuntimeAdapter,
+  type RuntimeCapabilities,
   type RuntimeConnectionValidationInput,
   type RuntimeConnectionValidationResult,
   type RuntimeDiagnoseErrorInput,
@@ -23,8 +24,9 @@ import {
   listClaudeRuntimeSessions,
 } from "./sessions.js";
 import { runClaudeRuntime, type ClaudeRuntimeRunLogger } from "./run.js";
+import { runClaudeCli, type ClaudeCliLogger } from "./cli.js";
 
-export type ClaudeRuntimeAdapterLogger = ClaudeRuntimeRunLogger;
+export type ClaudeRuntimeAdapterLogger = ClaudeRuntimeRunLogger & ClaudeCliLogger;
 
 export interface CreateClaudeRuntimeAdapterOptions {
   runtimeId?: string;
@@ -57,6 +59,46 @@ function createFallbackLogger(): ClaudeRuntimeAdapterLogger {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Transport-aware capabilities
+// ---------------------------------------------------------------------------
+
+/** SDK transport has full capabilities. */
+const SDK_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: true,
+  supportsSessionList: true,
+  supportsAgentDefinitions: true,
+  supportsStreaming: true,
+  supportsModelDiscovery: true,
+  supportsApprovals: true,
+  supportsCustomEndpoint: true,
+};
+
+/**
+ * CLI transport supports agent definitions (via --agent flag), sessions
+ * (via --resume), but no streaming or approvals.
+ */
+const CLI_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: true,
+  supportsSessionList: true,
+  supportsAgentDefinitions: true,
+  supportsStreaming: false,
+  supportsModelDiscovery: true,
+  supportsApprovals: false,
+  supportsCustomEndpoint: false,
+};
+
+/** API transport — requires explicit key + baseUrl, no agent definitions. */
+const API_CAPABILITIES: RuntimeCapabilities = {
+  supportsResume: false,
+  supportsSessionList: false,
+  supportsAgentDefinitions: false,
+  supportsStreaming: true,
+  supportsModelDiscovery: true,
+  supportsApprovals: false,
+  supportsCustomEndpoint: true,
+};
 
 function readStringOption(input: RuntimeConnectionValidationInput, key: string): string | null {
   const options = input.options ?? {};
@@ -115,6 +157,15 @@ export function createClaudeRuntimeAdapter(
   const logger = options.logger ?? createFallbackLogger();
   const executablePath = options.executablePath ?? findClaudePath();
 
+  function runByTransport(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+    const transport = input.transport ?? RuntimeTransport.SDK;
+    if (transport === RuntimeTransport.CLI) {
+      return runClaudeCli(input, logger, { pathToClaudeCodeExecutable: executablePath });
+    }
+    // SDK and API both go through the Agent SDK runtime
+    return runClaudeRuntime(input, logger, { pathToClaudeCodeExecutable: executablePath });
+  }
+
   return {
     descriptor: {
       id: runtimeId,
@@ -123,24 +174,24 @@ export function createClaudeRuntimeAdapter(
       lightModel: "claude-haiku-3-5",
       defaultApiKeyEnvVar: "ANTHROPIC_API_KEY",
       defaultModelPlaceholder: "claude-sonnet-4-5",
-      supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.API],
-      capabilities: {
-        supportsResume: true,
-        supportsSessionList: true,
-        supportsAgentDefinitions: true,
-        supportsStreaming: true,
-        supportsModelDiscovery: true,
-        supportsApprovals: true,
-        supportsCustomEndpoint: true,
-      },
+      supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
+      capabilities: SDK_CAPABILITIES,
+    },
+    getEffectiveCapabilities(transport: RuntimeTransport): RuntimeCapabilities {
+      switch (transport) {
+        case RuntimeTransport.CLI:
+          return CLI_CAPABILITIES;
+        case RuntimeTransport.API:
+          return API_CAPABILITIES;
+        default:
+          return SDK_CAPABILITIES;
+      }
     },
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-      return runClaudeRuntime(input, logger, { pathToClaudeCodeExecutable: executablePath });
+      return runByTransport(input);
     },
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
-      return runClaudeRuntime({ ...input, resume: true }, logger, {
-        pathToClaudeCodeExecutable: executablePath,
-      });
+      return runByTransport({ ...input, resume: true });
     },
     async listSessions(input: RuntimeSessionListInput): Promise<RuntimeSession[]> {
       return listClaudeRuntimeSessions(input);

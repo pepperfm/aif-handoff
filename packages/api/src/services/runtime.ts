@@ -5,6 +5,7 @@ import {
   createRuntimeModelDiscoveryService,
   createRuntimeWorkflowSpec,
   redactResolvedRuntimeProfile,
+  resolveAdapterCapabilities,
   resolveRuntimeProfile,
   RUNTIME_TRUST_TOKEN,
   type RuntimeRunResult,
@@ -177,10 +178,11 @@ export function assertApiRuntimeCapabilities(input: {
   resolvedProfile: ResolvedRuntimeProfile;
   workflow: RuntimeWorkflowSpec;
 }): void {
+  const capabilities = resolveAdapterCapabilities(input.adapter, input.resolvedProfile.transport);
   const result = checkRuntimeCapabilities({
     runtimeId: input.resolvedProfile.runtimeId,
     workflowKind: input.workflow.workflowKind,
-    capabilities: input.adapter.descriptor.capabilities,
+    capabilities,
     required: input.workflow.requiredCapabilities,
     logger: {
       debug(context, message) {

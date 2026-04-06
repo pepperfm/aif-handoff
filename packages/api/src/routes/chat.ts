@@ -5,6 +5,7 @@ import {
   createRuntimeWorkflowSpec,
   getResultSessionId,
   isRuntimeErrorCategory,
+  resolveAdapterCapabilities,
   RuntimeTransport,
   type RuntimeAdapter,
   type RuntimeEvent,
@@ -298,7 +299,8 @@ chatRouter.get("/sessions", async (c) => {
     );
     const adapter = context.adapter;
     const runtimeId = context.resolvedProfile.runtimeId;
-    if (!adapter.descriptor.capabilities.supportsSessionList || !adapter.listSessions) {
+    const caps = resolveAdapterCapabilities(adapter, context.resolvedProfile.transport);
+    if (!caps.supportsSessionList || !adapter.listSessions) {
       log.warn(
         {
           projectId,
@@ -766,6 +768,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       providerId: runtimeProviderId,
       profileId: runtimeProfileId,
       workflowKind: "chat",
+      transport: runtimeContext.resolvedProfile.transport,
       prompt,
       model: runtimeContext.resolvedProfile.model ?? undefined,
       sessionId: resumeRuntimeSessionId,
@@ -806,8 +809,8 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         ? await adapter.resume({ ...runInput, sessionId: resumeRuntimeSessionId })
         : await adapter.run(runInput);
 
-    const runtimeSessionId =
-      getResultSessionId(result, adapter.descriptor.capabilities) ?? resumeRuntimeSessionId ?? null;
+    const chatCaps = resolveAdapterCapabilities(adapter, runtimeContext.resolvedProfile.transport);
+    const runtimeSessionId = getResultSessionId(result, chatCaps) ?? resumeRuntimeSessionId ?? null;
     if (chatSessionId && runtimeSessionId) {
       updateChatSession(chatSessionId, {
         runtimeProfileId,

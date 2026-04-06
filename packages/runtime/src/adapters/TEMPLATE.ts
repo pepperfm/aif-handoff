@@ -41,7 +41,7 @@
  * | CLI       | Spawn a subprocess, parse stdout                | `codex run --json` |
  * | API       | HTTP POST to a remote endpoint                  | OpenAI-compatible REST API |
  *
- * Adapter can support multiple transports (see Codex adapter: cli.ts + api.ts).
+ * Adapter can support multiple transports (see Codex adapter: sdk.ts + cli.ts + api.ts).
  * Transport is selected via RuntimeProfile.transport field.
  *
  * ## Capabilities → optional methods mapping
@@ -58,6 +58,22 @@
  *
  * Set capabilities to false for features you don't implement.
  * The system checks capabilities BEFORE calling optional methods.
+ *
+ * ## Transport-aware capabilities
+ *
+ * If your adapter supports multiple transports with different capability sets,
+ * implement `getEffectiveCapabilities(transport)`. The system calls
+ * `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
+ *
+ * ```ts
+ * getEffectiveCapabilities(transport: RuntimeTransport): RuntimeCapabilities {
+ *   if (transport === RuntimeTransport.SDK) return SDK_CAPS;
+ *   if (transport === RuntimeTransport.CLI) return CLI_CAPS;
+ *   return DEFAULT_CAPS;
+ * }
+ * ```
+ *
+ * `descriptor.capabilities` should reflect the default transport's capabilities.
  *
  * ## Reading execution options in run()
  *
@@ -174,6 +190,10 @@ export function createExampleRuntimeAdapter(
 
     // Uncomment and implement as you enable capabilities:
     //
+    // getEffectiveCapabilities(transport) {
+    //   // Return per-transport capabilities if different from descriptor.capabilities
+    //   return this.descriptor.capabilities;
+    // },
     // async resume(input) { ... },
     // async listSessions(input) { ... },
     // async getSession(input) { ... },

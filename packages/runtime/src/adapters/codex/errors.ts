@@ -4,6 +4,12 @@ const CLI_NOT_FOUND_PATTERNS = ["enoent", "not recognized", "not found", "no suc
 const TIMEOUT_PATTERNS = ["timed out", "timeout", "etimedout"];
 const AUTH_PATTERNS = ["unauthorized", "invalid api key", "forbidden", "401", "403"];
 const TRANSPORT_PATTERNS = ["connection refused", "econnrefused", "network", "fetch failed"];
+const THREAD_PATTERNS = [
+  "thread not found",
+  "session not found",
+  "no such session",
+  "invalid thread",
+];
 const RATE_LIMIT_PATTERNS = [
   "rate limit",
   "rate_limit",
@@ -33,6 +39,9 @@ function classify(message: string): { adapterCode: string; category: RuntimeErro
   }
   if (TRANSPORT_PATTERNS.some((p) => lowered.includes(p))) {
     return { adapterCode: "CODEX_TRANSPORT_ERROR", category: "unknown" };
+  }
+  if (THREAD_PATTERNS.some((p) => lowered.includes(p))) {
+    return { adapterCode: "CODEX_THREAD_NOT_FOUND", category: "unknown" };
   }
   return { adapterCode: "CODEX_RUNTIME_ERROR", category: "unknown" };
 }

@@ -309,7 +309,7 @@ export function validateResolvedRuntimeProfile(
     warnings.push("CLI transport is selected but codexCliPath is missing");
   }
 
-  // SDK transport — API key is optional (session auth may be used)
+  // SDK transport — API key is optional (CLI-backed SDKs manage auth via their own login flow)
 
   const ok = warnings.length === 0;
   return {

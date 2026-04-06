@@ -50,19 +50,21 @@ The API exposes effective selection endpoints:
 
 ## Supported Runtimes
 
-| Runtime  | Provider    | Transports | Resume       | Sessions     | Agent Defs   | Light Model        | Status                    |
-| -------- | ----------- | ---------- | ------------ | ------------ | ------------ | ------------------ | ------------------------- |
-| `claude` | `anthropic` | SDK        | Yes          | Yes          | Yes          | `claude-haiku-3-5` | Built-in                  |
-| `codex`  | `openai`    | CLI, API   | No           | No           | No           | default            | Built-in                  |
-| Custom   | Any         | Any        | Configurable | Configurable | Configurable | Configurable       | Via `AIF_RUNTIME_MODULES` |
+| Runtime  | Provider    | Transports    | Resume         | Sessions       | Agent Defs    | Light Model        | Status                    |
+| -------- | ----------- | ------------- | -------------- | -------------- | ------------- | ------------------ | ------------------------- |
+| `claude` | `anthropic` | SDK, CLI, API | Yes (SDK/CLI)  | Yes (SDK/CLI)  | Yes (SDK/CLI) | `claude-haiku-3-5` | Built-in                  |
+| `codex`  | `openai`    | SDK, CLI, API | Yes (SDK only) | Yes (SDK only) | No            | default            | Built-in                  |
+| Custom   | Any         | Any           | Configurable   | Configurable   | Configurable  | Configurable       | Via `AIF_RUNTIME_MODULES` |
+
+Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, the Codex adapter supports resume/sessions via SDK transport but not via CLI. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
 ### Transport Types
 
-| Transport | Description                           | Example                    |
-| --------- | ------------------------------------- | -------------------------- |
-| `sdk`     | In-process library call via JS/TS SDK | Claude Agent SDK `query()` |
-| `cli`     | Spawn a subprocess, parse stdout      | `codex run --json`         |
-| `api`     | HTTP POST to a remote endpoint        | OpenAI-compatible REST API |
+| Transport | Description                           | Example                                  |
+| --------- | ------------------------------------- | ---------------------------------------- |
+| `sdk`     | In-process library call via JS/TS SDK | Claude Agent SDK, Codex SDK              |
+| `cli`     | Spawn a subprocess, parse stdout      | `claude --agent ...`, `codex run --json` |
+| `api`     | HTTP POST to a remote endpoint        | OpenAI-compatible REST API               |
 
 ## Built-In Adapter Examples
 
@@ -87,6 +89,50 @@ Optional proxy mode:
 - set one of `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`
 - if proxy requires explicit model, set `ANTHROPIC_MODEL` (or profile `defaultModel`)
 - if proxy handles model routing, keep `defaultModel` empty
+
+### Claude (CLI)
+
+Spawns `claude` binary as a subprocess. Supports `--agent` flag for agent definitions and `--resume` for session continuation. Auth is handled by the CLI's own login (`claude /login`).
+
+```json
+{
+  "projectId": null,
+  "name": "Claude CLI",
+  "runtimeId": "claude",
+  "providerId": "anthropic",
+  "transport": "cli",
+  "defaultModel": "claude-sonnet-4-5",
+  "enabled": true
+}
+```
+
+CLI-specific options:
+
+- `claudeCliPath` — override for the `claude` binary path (default: auto-discovered)
+- `CLAUDE_CLI_PATH` env var — same, via environment
+
+### Codex (SDK transport)
+
+Uses `@openai/codex-sdk` which wraps the Codex CLI with thread-based conversations, streaming events, and resume support. Auth is handled by the CLI's own login (`codex auth login`), same as Claude SDK.
+
+```json
+{
+  "projectId": null,
+  "name": "Codex SDK",
+  "runtimeId": "codex",
+  "providerId": "openai",
+  "transport": "sdk",
+  "defaultModel": "gpt-5.4",
+  "enabled": true
+}
+```
+
+SDK-specific options:
+
+- `codexCliPath` — path to the `codex` binary (SDK wraps the CLI)
+- `codexConfig` — JSON object of CLI config overrides (flattened to `--config` flags)
+- `sandboxMode` — one of `read-only`, `workspace-write`, `danger-full-access`
+- `modelReasoningEffort` — one of `minimal`, `low`, `medium`, `high`, `xhigh`
 
 ### Codex (CLI transport)
 
@@ -133,7 +179,13 @@ Runtime descriptors declare capability flags:
 - `supportsApprovals`
 - `supportsCustomEndpoint`
 
+Additionally, `RuntimeExecutionIntent` supports `outputSchema` for structured JSON output (passed to adapters that support it, e.g. Codex SDK).
+
 Workflows with unsupported requirements are rejected with normalized validation errors instead of raw adapter exceptions.
+
+### Transport-Aware Capabilities
+
+Adapters that support multiple transports may implement `getEffectiveCapabilities(transport)` to declare per-transport capability sets. The system uses `resolveAdapterCapabilities(adapter, transport)` to query the effective capabilities before checking workflow requirements.
 
 ## Runtime Profile API
 

@@ -1,6 +1,7 @@
 export {
   DEFAULT_RUNTIME_CAPABILITIES,
   getResultSessionId,
+  resolveAdapterCapabilities,
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeConnectionValidationInput,

@@ -13,7 +13,7 @@ Autonomous task management system with Kanban board and AI subagents. Tasks flow
 - **API:** Hono + WebSocket
 - **Database:** SQLite (better-sqlite3 + drizzle-orm)
 - **Frontend:** React 19 + Vite + TailwindCSS 4
-- **Runtime:** Pluggable adapter system (`@aif/runtime`) — built-in Claude (Agent SDK) + Codex (CLI/API) adapters
+- **Runtime:** Pluggable adapter system (`@aif/runtime`) — built-in Claude (SDK/CLI) + Codex (SDK/CLI/API) adapters
 - **Agent:** Runtime-neutral coordinator + node-cron
 - **Testing:** Vitest
 
@@ -52,18 +52,21 @@ packages/
 │       ├── module.ts        # Dynamic module loader for external adapters
 │       └── adapters/
 │           ├── TEMPLATE.ts      # Adapter development guide + skeleton
-│           ├── claude/          # Claude adapter (Agent SDK transport)
+│           ├── claude/          # Claude adapter (SDK + CLI + API transports)
 │           │   ├── index.ts     # Factory: createClaudeRuntimeAdapter()
 │           │   ├── options.ts   # Parse execution intent → Claude SDK query options
 │           │   ├── stream.ts    # Async stream consumer (events, text, usage)
 │           │   ├── run.ts       # Orchestrator with timeout/resume retry
+│           │   ├── cli.ts       # CLI transport: spawn `claude` with --agent/--resume
 │           │   ├── sessions.ts  # Session list/get/events via Agent SDK
 │           │   ├── hooks.ts     # SDK hook wiring + generic callback bridges
 │           │   ├── errors.ts    # Error classification (usage limit, auth, stream)
 │           │   └── diagnostics.ts # CLI probe + stderr analysis for diagnoseError()
-│           └── codex/           # Codex adapter (CLI + API transports)
+│           └── codex/           # Codex adapter (SDK + CLI + API transports)
 │               ├── index.ts     # Factory: createCodexRuntimeAdapter()
+│               ├── sdk.ts       # SDK transport: @openai/codex-sdk thread lifecycle
 │               ├── cli.ts       # CLI transport: spawn process, parse stdout
+│               ├── sessions.ts  # Session management for SDK threads
 │               ├── api.ts       # API transport: HTTP POST to remote endpoint
 │               └── errors.ts    # Error classification (CLI not found, timeout, auth)
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
@@ -108,17 +111,17 @@ data/                    # SQLite database files (gitignored)
 
 ## Key Entry Points
 
-| File                                  | Purpose                              |
-| ------------------------------------- | ------------------------------------ |
-| `packages/api/src/index.ts`           | API server entry (Hono, port 3009)   |
-| `packages/web/src/main.tsx`           | Web app entry (React, port 5180)     |
-| `packages/agent/src/index.ts`         | Agent coordinator entry              |
-| `packages/runtime/src/index.ts`       | Runtime public API                   |
-| `packages/runtime/src/types.ts`       | RuntimeAdapter interface + contracts |
-| `packages/data/src/index.ts`          | Centralized data-access API          |
-| `packages/shared/src/schema.ts`       | Database schema (drizzle-orm)        |
-| `packages/shared/src/stateMachine.ts` | Task state transitions               |
-| `turbo.json`                          | Turborepo task definitions           |
+| File                                  | Purpose                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `packages/api/src/index.ts`           | API server entry (Hono, port 3009)                      |
+| `packages/web/src/main.tsx`           | Web app entry (React, port 5180)                        |
+| `packages/agent/src/index.ts`         | Agent coordinator entry                                 |
+| `packages/runtime/src/index.ts`       | Runtime public API                                      |
+| `packages/runtime/src/types.ts`       | RuntimeAdapter interface + transport-aware capabilities |
+| `packages/data/src/index.ts`          | Centralized data-access API                             |
+| `packages/shared/src/schema.ts`       | Database schema (drizzle-orm)                           |
+| `packages/shared/src/stateMachine.ts` | Task state transitions                                  |
+| `turbo.json`                          | Turborepo task definitions                              |
 
 ## Documentation
 
