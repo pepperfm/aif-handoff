@@ -5,6 +5,7 @@ import {
   runCodexAgentApiStreaming,
   validateCodexAgentApiConnection,
 } from "../adapters/codex/api.js";
+import { CodexRuntimeAdapterError } from "../adapters/codex/errors.js";
 
 function createRunInput(overrides: Record<string, unknown> = {}) {
   return {
@@ -153,6 +154,18 @@ describe("codex api transport (OpenAI Chat Completions)", () => {
     expect(result.message).toContain("503");
   });
 
+  it("throws classified error for health-check network failure", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    await expect(
+      validateCodexAgentApiConnection({
+        runtimeId: "codex",
+        providerId: "openai",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).rejects.toBeInstanceOf(CodexRuntimeAdapterError);
+  });
+
   it("lists models from OpenAI data payload", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
@@ -181,6 +194,30 @@ describe("codex api transport (OpenAI Chat Completions)", () => {
 
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.openai.com/v1/models");
+  });
+
+  it("throws classified error when model listing returns non-ok", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("oops", { status: 500 }));
+
+    await expect(
+      listCodexAgentApiModels({
+        runtimeId: "codex",
+        providerId: "openai",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).rejects.toBeInstanceOf(CodexRuntimeAdapterError);
+  });
+
+  it("throws classified error when model listing has network failure", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    await expect(
+      listCodexAgentApiModels({
+        runtimeId: "codex",
+        providerId: "openai",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).rejects.toBeInstanceOf(CodexRuntimeAdapterError);
   });
 
   it("uses env fallback for base url and API key", async () => {

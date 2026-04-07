@@ -283,6 +283,25 @@ describe("OpenRouter API transport", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(result.outputText).toBe("retry");
     });
+
+    it("ignores malformed SSE chunks and continues", async () => {
+      fetchMock.mockResolvedValueOnce(
+        sseResponse([
+          "data: {not-json}\n\n",
+          'data: {"id":"gen-3","choices":[{"delta":{"content":"ok"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      );
+
+      const logger = { debug: vi.fn() };
+      const result = await runOpenRouterApiStreaming(
+        createRunInput({ options: { apiKey: "sk-test" } }),
+        logger,
+      );
+
+      expect(result.outputText).toBe("ok");
+      expect(logger.debug).toHaveBeenCalled();
+    });
   });
 
   // --- validateOpenRouterApiConnection ---
@@ -308,6 +327,17 @@ describe("OpenRouter API transport", () => {
       });
 
       expect(result.ok).toBe(false);
+    });
+
+    it("throws classified error on network failure", async () => {
+      fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+      await expect(
+        validateOpenRouterApiConnection({
+          runtimeId: "openrouter",
+          options: { apiKey: "sk-test" },
+        }),
+      ).rejects.toBeInstanceOf(OpenRouterRuntimeAdapterError);
     });
   });
 
@@ -360,6 +390,17 @@ describe("OpenRouter API transport", () => {
 
     it("throws classified error on HTTP failure", async () => {
       fetchMock.mockResolvedValueOnce(new Response("", { status: 500 }));
+
+      await expect(
+        listOpenRouterApiModels({
+          runtimeId: "openrouter",
+          options: { apiKey: "sk-test" },
+        }),
+      ).rejects.toBeInstanceOf(OpenRouterRuntimeAdapterError);
+    });
+
+    it("throws classified error on network failure", async () => {
+      fetchMock.mockRejectedValueOnce(new Error("network down"));
 
       await expect(
         listOpenRouterApiModels({
