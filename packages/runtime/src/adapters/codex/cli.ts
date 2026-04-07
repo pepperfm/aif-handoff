@@ -52,9 +52,10 @@ function normalizeCliArgs(input: RuntimeRunInput): string[] {
     args.push("--model", input.model);
   }
   // On Windows with shell: true, stdin piping through cmd.exe is unreliable.
-  // Pass the prompt via --prompt arg instead to avoid "Reading prompt from stdin..." hangs.
+  // Pass the prompt as a positional argument to avoid "Reading prompt from stdin..." hangs.
+  // Usage: codex exec [OPTIONS] [PROMPT]
   if (IS_WINDOWS && input.prompt) {
-    args.push("--prompt", input.prompt);
+    args.push(input.prompt);
   }
   return args;
 }
@@ -321,7 +322,7 @@ export async function runCodexCli(
     child.stdin.on("error", () => {
       // Ignore broken-pipe errors — the child may exit before stdin is fully written
     });
-    if (shouldWritePromptToStdin(args)) {
+    if (!IS_WINDOWS && shouldWritePromptToStdin(args)) {
       child.stdin.write(input.prompt);
     }
     child.stdin.end();
