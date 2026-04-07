@@ -271,10 +271,12 @@ export async function runCodexCli(
   );
 
   return new Promise<RuntimeRunResult>((resolve, reject) => {
+    // On Windows, prompt is passed as positional arg (not stdin), so stdin can be ignored.
+    // This prevents cmd.exe from leaving stdin open and Codex hanging on "Reading additional input".
     const child = spawn(cliPath, args, {
       cwd: input.cwd ?? input.projectRoot,
       env,
-      stdio: "pipe",
+      stdio: IS_WINDOWS ? ["ignore", "pipe", "pipe"] : "pipe",
       shell: IS_WINDOWS,
     });
 
@@ -287,11 +289,11 @@ export async function runCodexCli(
       child.kill("SIGKILL");
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer | string) => {
+    child.stdout!.on("data", (chunk: Buffer | string) => {
       stdout += String(chunk);
     });
 
-    child.stderr.on("data", (chunk: Buffer | string) => {
+    child.stderr!.on("data", (chunk: Buffer | string) => {
       stderr += String(chunk);
     });
 
@@ -319,12 +321,14 @@ export async function runCodexCli(
       }
     });
 
-    child.stdin.on("error", () => {
-      // Ignore broken-pipe errors — the child may exit before stdin is fully written
-    });
-    if (!IS_WINDOWS && shouldWritePromptToStdin(args)) {
-      child.stdin.write(input.prompt);
+    if (child.stdin) {
+      child.stdin.on("error", () => {
+        // Ignore broken-pipe errors — the child may exit before stdin is fully written
+      });
+      if (shouldWritePromptToStdin(args)) {
+        child.stdin.write(input.prompt);
+      }
+      child.stdin.end();
     }
-    child.stdin.end();
   });
 }
