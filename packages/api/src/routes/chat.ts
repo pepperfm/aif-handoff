@@ -40,6 +40,7 @@ import {
 import { chatRequestSchema, createChatSessionSchema, updateChatSessionSchema } from "../schemas.js";
 import { persistAttachments } from "../services/attachmentPersistence.js";
 import { readAttachment } from "../services/attachmentStorage.js";
+import { getCodexExecutionHooks } from "../services/codexExecutionHooks.js";
 import { broadcast, sendToClient } from "../ws.js";
 import {
   getCached,
@@ -152,21 +153,6 @@ function parseVirtualRuntimeSessionId(
 
 function runtimeSourceFromTransport(transport: string): "cli" | "agent" {
   return transport === RuntimeTransport.CLI ? "cli" : "agent";
-}
-
-function getCodexExecutionHooks(input: {
-  runtimeId: string;
-  transport: string;
-  bypassPermissions: boolean;
-}): Record<string, unknown> {
-  if (input.runtimeId !== "codex" || input.transport !== RuntimeTransport.SDK) {
-    return {};
-  }
-
-  return {
-    approvalPolicy: input.bypassPermissions ? "never" : "on-request",
-    sandboxMode: "workspace-write",
-  };
 }
 
 function classifyChatError(err: unknown): {

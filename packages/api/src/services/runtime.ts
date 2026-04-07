@@ -17,6 +17,7 @@ import {
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
+import { getCodexExecutionHooks } from "./codexExecutionHooks.js";
 import {
   findProjectById,
   findRuntimeProfileById,
@@ -30,21 +31,6 @@ const log = logger("api-runtime");
 
 let runtimeRegistryPromise: Promise<RuntimeRegistry> | null = null;
 let modelDiscoveryService: RuntimeModelDiscoveryService | null = null;
-
-function getCodexExecutionHooks(input: {
-  runtimeId: string;
-  transport: string;
-  bypassPermissions: boolean;
-}): Record<string, unknown> {
-  if (input.runtimeId !== "codex" || input.transport !== "sdk") {
-    return {};
-  }
-
-  return {
-    approvalPolicy: input.bypassPermissions ? "never" : "on-request",
-    sandboxMode: "workspace-write",
-  };
-}
 
 export async function getApiRuntimeRegistry(): Promise<RuntimeRegistry> {
   if (!runtimeRegistryPromise) {
