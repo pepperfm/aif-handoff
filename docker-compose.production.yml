@@ -15,6 +15,7 @@ services:
       - db-data:/data
       - projects:${PROJECTS_MOUNT:-/home/www}
       - claude-auth:/home/node/.claude
+      - codex-auth:/home/node/.codex
     restart: always
     read_only: true
     tmpfs:
@@ -100,6 +101,7 @@ services:
       - db-data:/data
       - projects:${PROJECTS_MOUNT:-/home/www}
       - claude-auth:/home/node/.claude
+      - codex-auth:/home/node/.codex
     depends_on:
       api:
         condition: service_healthy
@@ -166,4 +168,5 @@ volumes:
   db-data:
   projects:
   claude-auth:
+  codex-auth:
   ssl-certs:
