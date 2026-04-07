@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   listCodexAgentApiModels,
   runCodexAgentApi,
+  runCodexAgentApiStreaming,
   validateCodexAgentApiConnection,
 } from "../adapters/codex/api.js";
+import { CodexRuntimeAdapterError } from "../adapters/codex/errors.js";
 
 function createRunInput(overrides: Record<string, unknown> = {}) {
   return {
@@ -12,7 +14,7 @@ function createRunInput(overrides: Record<string, unknown> = {}) {
     profileId: "profile-1",
     workflowKind: "implementer",
     prompt: "Implement feature",
-    model: "gpt-5.4",
+    model: "gpt-4o",
     sessionId: "session-1",
     resume: false,
     options: {},
@@ -28,7 +30,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-describe("codex agentapi transport", () => {
+describe("codex api transport (OpenAI Chat Completions)", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -42,20 +44,19 @@ describe("codex agentapi transport", () => {
     vi.unstubAllEnvs();
   });
 
-  it("runs through agentapi transport and normalizes response", async () => {
+  it("sends chat completions request and parses response", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        outputText: "done",
-        sessionId: "session-2",
-        usage: { inputTokens: 12, outputTokens: 8, costUsd: 0.2 },
-        events: [{ type: "stream:text", timestamp: "2026-04-04T00:00:00.000Z" }],
+        id: "chatcmpl-123",
+        choices: [{ message: { role: "assistant", content: "done" } }],
+        usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
       }),
     );
 
     const result = await runCodexAgentApi(
       createRunInput({
         options: {
-          agentApiBaseUrl: "https://agent.example.com/",
+          baseUrl: "https://api.openai.com/v1",
           apiKey: "sk-test",
           headers: { "X-Trace-Id": "trace-1" },
         },
@@ -64,51 +65,59 @@ describe("codex agentapi transport", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://agent.example.com/v1/runtime/run");
+    expect(url).toBe("https://api.openai.com/v1/chat/completions");
     expect(init.method).toBe("POST");
+
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer sk-test");
     expect(headers.get("x-trace-id")).toBe("trace-1");
 
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body.prompt).toBe("Implement feature");
-    expect(body.model).toBe("gpt-5.4");
-    expect(body.sessionId).toBe("session-1");
+    expect(body.model).toBe("gpt-4o");
+    expect(body.messages).toEqual([{ role: "user", content: "Implement feature" }]);
+    expect(body.stream).toBe(false);
 
     expect(result.outputText).toBe("done");
-    expect(result.sessionId).toBe("session-2");
+    expect(result.sessionId).toBe("chatcmpl-123");
     expect(result.usage).toEqual({
       inputTokens: 12,
       outputTokens: 8,
       totalTokens: 20,
-      costUsd: 0.2,
+      costUsd: undefined,
     });
-    expect(result.events).toEqual([{ type: "stream:text", timestamp: "2026-04-04T00:00:00.000Z" }]);
   });
 
-  it("supports custom run path without leading slash", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ result: "ok" }));
-
-    await runCodexAgentApi(
-      createRunInput({
-        options: {
-          agentApiBaseUrl: "https://agent.example.com",
-          agentApiRunPath: "custom/run",
-        },
+  it("includes system prompt in messages", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        id: "chatcmpl-456",
+        choices: [{ message: { role: "assistant", content: "ok" } }],
       }),
     );
 
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://agent.example.com/custom/run");
+    await runCodexAgentApi(
+      createRunInput({
+        systemPrompt: "You are a planner",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    );
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.messages).toEqual([
+      { role: "system", content: "You are a planner" },
+      { role: "user", content: "Implement feature" },
+    ]);
   });
 
-  it("throws classified error for non-ok run responses", async () => {
+  it("throws classified error for non-ok responses", async () => {
     fetchMock.mockResolvedValueOnce(new Response("invalid key", { status: 401 }));
 
     await expect(
       runCodexAgentApi(
         createRunInput({
-          options: { agentApiBaseUrl: "https://agent.example.com" },
+          options: { baseUrl: "https://api.openai.com/v1" },
         }),
       ),
     ).rejects.toMatchObject({
@@ -117,18 +126,18 @@ describe("codex agentapi transport", () => {
     });
   });
 
-  it("validates connection via health endpoint", async () => {
+  it("validates connection via /models endpoint", async () => {
     fetchMock.mockResolvedValueOnce(new Response("ok", { status: 200 }));
 
     const result = await validateCodexAgentApiConnection({
       runtimeId: "codex",
       providerId: "openai",
-      options: { agentApiBaseUrl: "https://agent.example.com" },
+      options: { baseUrl: "https://api.openai.com/v1" },
     });
 
-    expect(result).toEqual({ ok: true, message: "AgentAPI connection validated" });
+    expect(result).toEqual({ ok: true, message: "OpenAI API connection validated" });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://agent.example.com/v1/runtime/health");
+    expect(url).toBe("https://api.openai.com/v1/models");
     expect(init.method).toBe("GET");
   });
 
@@ -138,50 +147,81 @@ describe("codex agentapi transport", () => {
     const result = await validateCodexAgentApiConnection({
       runtimeId: "codex",
       providerId: "openai",
-      options: { agentApiBaseUrl: "https://agent.example.com", agentApiValidationPath: "healthz" },
+      options: { baseUrl: "https://api.openai.com/v1" },
     });
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain("503");
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://agent.example.com/healthz");
   });
 
-  it("lists models from `models` and `data` payload shapes", async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse({
-          models: [{ id: "gpt-5.4", label: "GPT 5.4", supportsStreaming: true }],
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: [{ id: "gpt-5.4-mini", label: "GPT 5.4 Mini", supportsStreaming: true }],
-        }),
-      );
+  it("throws classified error for health-check network failure", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const first = await listCodexAgentApiModels({
-      runtimeId: "codex",
-      providerId: "openai",
-      options: { agentApiBaseUrl: "https://agent.example.com" },
-    });
-    const second = await listCodexAgentApiModels({
-      runtimeId: "codex",
-      providerId: "openai",
-      options: { agentApiBaseUrl: "https://agent.example.com", agentApiModelsPath: "models" },
-    });
+    await expect(
+      validateCodexAgentApiConnection({
+        runtimeId: "codex",
+        providerId: "openai",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).rejects.toBeInstanceOf(CodexRuntimeAdapterError);
+  });
 
-    expect(first).toEqual([{ id: "gpt-5.4", label: "GPT 5.4", supportsStreaming: true }]);
-    expect(second).toEqual([
-      { id: "gpt-5.4-mini", label: "GPT 5.4 Mini", supportsStreaming: true },
-    ]);
-    expect((fetchMock.mock.calls[1] as [string, RequestInit])[0]).toBe(
-      "https://agent.example.com/models",
+  it("lists models from OpenAI data payload", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          { id: "gpt-4o", owned_by: "openai" },
+          { id: "gpt-4o-mini", owned_by: "openai" },
+        ],
+      }),
     );
+
+    const models = await listCodexAgentApiModels({
+      runtimeId: "codex",
+      providerId: "openai",
+      options: { baseUrl: "https://api.openai.com/v1" },
+    });
+
+    expect(models).toEqual([
+      { id: "gpt-4o", label: "gpt-4o", supportsStreaming: true, metadata: { owned_by: "openai" } },
+      {
+        id: "gpt-4o-mini",
+        label: "gpt-4o-mini",
+        supportsStreaming: true,
+        metadata: { owned_by: "openai" },
+      },
+    ]);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.openai.com/v1/models");
+  });
+
+  it("throws classified error when model listing returns non-ok", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("oops", { status: 500 }));
+
+    await expect(
+      listCodexAgentApiModels({
+        runtimeId: "codex",
+        providerId: "openai",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).rejects.toBeInstanceOf(CodexRuntimeAdapterError);
+  });
+
+  it("throws classified error when model listing has network failure", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    await expect(
+      listCodexAgentApiModels({
+        runtimeId: "codex",
+        providerId: "openai",
+        options: { baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).rejects.toBeInstanceOf(CodexRuntimeAdapterError);
   });
 
   it("uses env fallback for base url and API key", async () => {
-    vi.stubEnv("AGENTAPI_BASE_URL", "https://agent.env/");
+    vi.stubEnv("OPENAI_BASE_URL", "https://api.openai.com/v1");
     vi.stubEnv("OPENAI_API_KEY", "env-key");
     fetchMock.mockResolvedValueOnce(new Response("ok", { status: 200 }));
 
@@ -192,7 +232,7 @@ describe("codex agentapi transport", () => {
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://agent.env/v1/runtime/health");
+    expect(url).toBe("https://api.openai.com/v1/models");
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer env-key");
   });
@@ -208,5 +248,46 @@ describe("codex agentapi transport", () => {
       name: "CodexRuntimeAdapterError",
       adapterCode: "CODEX_RUNTIME_ERROR",
     });
+  });
+
+  it("streaming collects text deltas and returns full output", async () => {
+    const sseBody = [
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"Hello"}}]}',
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":" world"}}]}',
+      'data: {"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}',
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sseBody));
+        controller.close();
+      },
+    });
+
+    fetchMock.mockResolvedValueOnce(new Response(stream, { status: 200 }));
+
+    const events: Array<{ type: string; message?: string }> = [];
+    const result = await runCodexAgentApiStreaming(
+      createRunInput({
+        options: { baseUrl: "https://api.openai.com/v1" },
+        execution: {
+          onEvent: (e: { type: string; message?: string }) => events.push(e),
+        },
+      }),
+    );
+
+    expect(result.outputText).toBe("Hello world");
+    expect(result.sessionId).toBe("chatcmpl-1");
+    expect(result.usage).toEqual({
+      inputTokens: 5,
+      outputTokens: 2,
+      totalTokens: 7,
+      costUsd: undefined,
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0].message).toBe("Hello");
+    expect(events[1].message).toBe(" world");
   });
 });

@@ -14,6 +14,7 @@ services:
       - db-data:/data
       - ${PROJECTS_DIR:-./projects}:${PROJECTS_MOUNT:-/home/www}
       - claude-auth:/home/node/.claude
+      - codex-auth:/home/node/.codex
     restart: unless-stopped
 
   web:
@@ -41,6 +42,7 @@ services:
       - db-data:/data
       - ${PROJECTS_DIR:-./projects}:${PROJECTS_MOUNT:-/home/www}
       - claude-auth:/home/node/.claude
+      - codex-auth:/home/node/.codex
     depends_on:
       - api
     restart: unless-stopped
@@ -67,3 +69,4 @@ services:
 volumes:
   db-data:
   claude-auth:
+  codex-auth:

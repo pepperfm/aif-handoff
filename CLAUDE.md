@@ -13,7 +13,7 @@ Autonomous task management system with Kanban board and AI subagents. Tasks flow
 - **API:** Hono + WebSocket
 - **Database:** SQLite (better-sqlite3 + drizzle-orm)
 - **Frontend:** React 19 + Vite + TailwindCSS 4
-- **Runtime:** Pluggable adapter system (`@aif/runtime`) — built-in Claude (SDK/CLI) + Codex (SDK/CLI/API) adapters
+- **Runtime:** Pluggable adapter system (`@aif/runtime`) — built-in Claude (SDK/CLI) + Codex (SDK/CLI/API) + OpenRouter (API) adapters
 - **Agent:** Runtime-neutral coordinator + node-cron
 - **Testing:** Vitest
 
@@ -62,13 +62,17 @@ packages/
 │           │   ├── hooks.ts     # SDK hook wiring + generic callback bridges
 │           │   ├── errors.ts    # Error classification (usage limit, auth, stream)
 │           │   └── diagnostics.ts # CLI probe + stderr analysis for diagnoseError()
-│           └── codex/           # Codex adapter (SDK + CLI + API transports)
-│               ├── index.ts     # Factory: createCodexRuntimeAdapter()
-│               ├── sdk.ts       # SDK transport: @openai/codex-sdk thread lifecycle
-│               ├── cli.ts       # CLI transport: spawn process, parse stdout
-│               ├── sessions.ts  # Session management for SDK threads
-│               ├── api.ts       # API transport: HTTP POST to remote endpoint
-│               └── errors.ts    # Error classification (CLI not found, timeout, auth)
+│           ├── codex/           # Codex adapter (SDK + CLI + API transports)
+│           │   ├── index.ts     # Factory: createCodexRuntimeAdapter()
+│           │   ├── sdk.ts       # SDK transport: @openai/codex-sdk thread lifecycle
+│           │   ├── cli.ts       # CLI transport: spawn process, parse stdout
+│           │   ├── sessions.ts  # Session management for SDK threads
+│           │   ├── api.ts       # API transport: HTTP POST to remote endpoint
+│           │   └── errors.ts    # Error classification (CLI not found, timeout, auth)
+│           └── openrouter/      # OpenRouter adapter (API transport)
+│               ├── index.ts     # Factory: createOpenRouterRuntimeAdapter()
+│               ├── api.ts       # API transport: chat completions, streaming, model discovery
+│               └── errors.ts    # Error classification (rate limit, auth, model not found)
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
 │       ├── index.ts         # Server entry point

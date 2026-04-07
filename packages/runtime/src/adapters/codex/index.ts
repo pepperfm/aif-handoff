@@ -21,6 +21,7 @@ import { runCodexCli, probeCodexCli, type CodexCliLogger } from "./cli.js";
 import {
   listCodexAgentApiModels,
   runCodexAgentApi,
+  runCodexAgentApiStreaming,
   validateCodexAgentApiConnection,
   type CodexAgentApiLogger,
 } from "./api.js";
@@ -220,6 +221,10 @@ export function createCodexRuntimeAdapter(
     }
 
     if (transport === RuntimeTransport.API) {
+      const wantsStreaming = input.execution?.onEvent != null;
+      if (wantsStreaming) {
+        return runCodexAgentApiStreaming({ ...input, transport }, logger);
+      }
       return runCodexAgentApi({ ...input, transport }, logger);
     }
 
@@ -233,6 +238,7 @@ export function createCodexRuntimeAdapter(
       displayName: options.displayName ?? "Codex",
       lightModel: null,
       defaultApiKeyEnvVar: "OPENAI_API_KEY",
+      defaultBaseUrlEnvVar: "OPENAI_BASE_URL",
       defaultModelPlaceholder: "gpt-5.4",
       supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
       defaultTransport: RuntimeTransport.CLI,
@@ -308,14 +314,13 @@ export function createCodexRuntimeAdapter(
         const baseUrl =
           readString(options.agentApiBaseUrl) ??
           readString(options.baseUrl) ??
-          readString(process.env.AGENTAPI_BASE_URL) ??
           readString(process.env.OPENAI_BASE_URL);
         if (!apiKey) {
           issues.push("Missing API key (expected env var: OPENAI_API_KEY)");
         }
         if (!baseUrl) {
           issues.push(
-            "Missing base URL for API transport (set AGENTAPI_BASE_URL or OPENAI_BASE_URL or profile baseUrl)",
+            "Missing base URL for API transport (set OPENAI_BASE_URL or profile baseUrl)",
           );
         }
         if (issues.length > 0) {
@@ -340,7 +345,7 @@ export function createCodexRuntimeAdapter(
                 profileId: input.profileId ?? null,
                 modelCount: models.length,
               },
-              "DEBUG [runtime:codex] Fetched model list from AgentAPI",
+              "DEBUG [runtime:codex] Fetched model list from OpenAI API",
             );
             return models;
           }
@@ -350,7 +355,7 @@ export function createCodexRuntimeAdapter(
               runtimeId: input.runtimeId,
               profileId: input.profileId ?? null,
             },
-            "WARN [runtime:codex] AgentAPI model discovery failed, falling back to built-in list",
+            "WARN [runtime:codex] OpenAI API model discovery failed, falling back to built-in list",
           );
         }
       }

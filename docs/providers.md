@@ -50,11 +50,12 @@ The API exposes effective selection endpoints:
 
 ## Supported Runtimes
 
-| Runtime  | Provider    | Transports    | Resume         | Sessions       | Agent Defs    | Light Model        | Status                    |
-| -------- | ----------- | ------------- | -------------- | -------------- | ------------- | ------------------ | ------------------------- |
-| `claude` | `anthropic` | SDK, CLI, API | Yes (SDK/CLI)  | Yes (SDK/CLI)  | Yes (SDK/CLI) | `claude-haiku-3-5` | Built-in                  |
-| `codex`  | `openai`    | SDK, CLI, API | Yes (SDK only) | Yes (SDK only) | No            | default            | Built-in                  |
-| Custom   | Any         | Any           | Configurable   | Configurable   | Configurable  | Configurable       | Via `AIF_RUNTIME_MODULES` |
+| Runtime      | Provider     | Transports    | Resume         | Sessions       | Agent Defs    | Light Model         | Status                    |
+| ------------ | ------------ | ------------- | -------------- | -------------- | ------------- | ------------------- | ------------------------- |
+| `claude`     | `anthropic`  | SDK, CLI, API | Yes (SDK/CLI)  | Yes (SDK/CLI)  | Yes (SDK/CLI) | `claude-haiku-3-5`  | Built-in                  |
+| `codex`      | `openai`     | SDK, CLI, API | Yes (SDK only) | Yes (SDK only) | No            | default             | Built-in                  |
+| `openrouter` | `openrouter` | API           | No             | No             | No            | null (configurable) | Built-in                  |
+| Custom       | Any          | Any           | Configurable   | Configurable   | Configurable  | Configurable        | Via `AIF_RUNTIME_MODULES` |
 
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, the Codex adapter supports resume/sessions via SDK transport but not via CLI. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
@@ -166,6 +167,39 @@ SDK-specific options:
   "enabled": true
 }
 ```
+
+### OpenRouter (API)
+
+OpenRouter is a unified API proxy providing access to 200+ models from multiple providers (Anthropic, OpenAI, Google, Meta, etc.) through a single OpenAI-compatible endpoint.
+
+```json
+{
+  "projectId": "PROJECT_UUID",
+  "name": "OpenRouter",
+  "runtimeId": "openrouter",
+  "providerId": "openrouter",
+  "transport": "api",
+  "apiKeyEnvVar": "OPENROUTER_API_KEY",
+  "defaultModel": "anthropic/claude-sonnet-4",
+  "enabled": true
+}
+```
+
+OpenRouter-specific options:
+
+- `httpReferer` — URL of your app, used for OpenRouter rankings and rate limit priority
+- `appTitle` — app name shown in OpenRouter dashboard (defaults to `AIF Handoff`)
+- `baseUrl` — custom endpoint (defaults to `https://openrouter.ai/api/v1`)
+
+Environment variables:
+
+- `OPENROUTER_API_KEY` — API key from [openrouter.ai/keys](https://openrouter.ai/keys)
+- `OPENROUTER_BASE_URL` — custom endpoint (for self-hosted proxies)
+- `OPENROUTER_MODEL` — default model when profile `defaultModel` is not set
+- `OPENROUTER_HTTP_REFERER` — recommended referer header for rankings
+- `OPENROUTER_APP_TITLE` — recommended app title header for rankings
+
+Model IDs use the `provider/model` format (e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`, `google/gemini-2.0-flash-001`). Some models are available for free (suffixed with `:free`).
 
 ## Capability Gates
 

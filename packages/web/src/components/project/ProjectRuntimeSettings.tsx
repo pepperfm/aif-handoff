@@ -51,6 +51,7 @@ export function ProjectRuntimeSettings({
   const [deletingProfile, setDeletingProfile] = useState<RuntimeProfile | null>(null);
   const [creating, setCreating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusVariant, setStatusVariant] = useState<"success" | "error" | "neutral">("neutral");
 
   const updateProject = useUpdateProject();
   const createProfile = useCreateRuntimeProfile();
@@ -87,13 +88,16 @@ export function ProjectRuntimeSettings({
         },
       });
       setStatusMessage("Project runtime defaults saved.");
+      setStatusVariant("success");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to save defaults");
+      setStatusVariant("error");
     }
   };
 
   const handleValidateProfile = async (profileId: string) => {
     setStatusMessage(null);
+    setStatusVariant("neutral");
     try {
       const result = await validateProfile.mutateAsync({ profileId, forceRefresh: true });
       const expectedEnvVar =
@@ -102,12 +106,15 @@ export function ProjectRuntimeSettings({
           : null;
       if (result.ok) {
         setStatusMessage(`Validation OK: ${result.message}`);
+        setStatusVariant("success");
         return;
       }
       const envHint = expectedEnvVar ? ` (expected env var: ${expectedEnvVar})` : "";
       setStatusMessage(`Validation failed: ${result.message}${envHint}`);
+      setStatusVariant("error");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Validation failed");
+      setStatusVariant("error");
     }
   };
 
@@ -221,8 +228,6 @@ export function ProjectRuntimeSettings({
         </Button>
       </div>
 
-      {statusMessage && <p className="text-xs text-muted-foreground">{statusMessage}</p>}
-
       <div className="space-y-2 border-t border-border pt-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Profiles
@@ -244,6 +249,7 @@ export function ProjectRuntimeSettings({
 
         {editingProfile && (
           <RuntimeProfileForm
+            key={editingProfile.id}
             mode="edit"
             projectId={editingProfile.projectId}
             runtimes={runtimes}
@@ -299,6 +305,20 @@ export function ProjectRuntimeSettings({
               </div>
             ))}
           </div>
+        )}
+
+        {statusMessage && (
+          <p
+            className={`mt-2 text-xs ${
+              statusVariant === "error"
+                ? "text-red-500"
+                : statusVariant === "success"
+                  ? "text-green-500"
+                  : "text-muted-foreground"
+            }`}
+          >
+            {statusMessage}
+          </p>
         )}
       </div>
 

@@ -189,6 +189,7 @@ export function createClaudeRuntimeAdapter(
       displayName: options.displayName ?? "Claude",
       lightModel: "haiku",
       defaultApiKeyEnvVar: "ANTHROPIC_API_KEY",
+      defaultBaseUrlEnvVar: "ANTHROPIC_BASE_URL",
       defaultModelPlaceholder: "opus",
       supportedTransports: [RuntimeTransport.SDK, RuntimeTransport.CLI, RuntimeTransport.API],
       capabilities: SDK_CAPABILITIES,

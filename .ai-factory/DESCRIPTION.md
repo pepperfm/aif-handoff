@@ -16,7 +16,7 @@ Autonomous task management system with Kanban board and AI subagents. Tasks flow
 - **Runtime:** Node.js + TypeScript (ES2022, ESNext modules)
 - **Monorepo:** Turborepo (npm workspaces)
 - **Runtime Modularity:** `@aif/runtime` workspace for runtime/provider contracts and registry
-- **Runtime Adapters:** Claude (Agent SDK), Codex (CLI/API), extensible via AIF_RUNTIME_MODULES
+- **Runtime Adapters:** Claude (Agent SDK), Codex (CLI/API), OpenRouter (API), extensible via AIF_RUNTIME_MODULES
 - **Database:** SQLite (better-sqlite3 + drizzle-orm)
 - **API:** Hono + @hono/node-server + WebSocket (ws)
 - **Validation:** zod + @hono/zod-validator

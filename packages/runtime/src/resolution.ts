@@ -24,8 +24,10 @@ export interface RuntimeResolutionEnv {
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
   OPENAI_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_BASE_URL?: string;
+  OPENROUTER_MODEL?: string;
   CODEX_CLI_PATH?: string;
-  AGENTAPI_BASE_URL?: string;
   [key: string]: string | undefined;
 }
 
@@ -41,6 +43,8 @@ export interface ResolveRuntimeProfileInput {
   env?: RuntimeResolutionEnv;
   workflow?: RuntimeWorkflowSpec;
   modelOverride?: string | null;
+  /** Adapter lightModel — used as fallback between profile.defaultModel and env inference. */
+  lightModelFallback?: string | null;
   suppressModelFallback?: boolean;
   runtimeOptionsOverride?: Record<string, unknown> | null;
   fallbackRuntimeId?: string;
@@ -92,6 +96,9 @@ function inferDefaultApiKeyEnvVar(
     if (normalizeString(env.ANTHROPIC_AUTH_TOKEN)) return "ANTHROPIC_AUTH_TOKEN";
     return "ANTHROPIC_API_KEY";
   }
+  if (runtime === "openrouter" || provider === "openrouter") {
+    return "OPENROUTER_API_KEY";
+  }
   return "OPENAI_API_KEY";
 }
 
@@ -107,11 +114,16 @@ function inferDefaultBaseUrl(
     return normalizeString(env.ANTHROPIC_BASE_URL);
   }
 
+  if (runtime === "openrouter" || provider === "openrouter") {
+    return normalizeString(env.OPENROUTER_BASE_URL) ?? "https://openrouter.ai/api/v1";
+  }
+
   return normalizeString(env.OPENAI_BASE_URL);
 }
 
 function inferDefaultTransport(runtimeId: string): RuntimeTransport {
   if (runtimeId.toLowerCase() === "codex") return RuntimeTransport.CLI;
+  if (runtimeId.toLowerCase() === "openrouter") return RuntimeTransport.API;
   return RuntimeTransport.SDK;
 }
 
@@ -129,6 +141,10 @@ function inferDefaultModel(
 
   if (runtime === "codex" || provider === "openai") {
     return normalizeString(env.OPENAI_MODEL);
+  }
+
+  if (runtime === "openrouter" || provider === "openrouter") {
+    return normalizeString(env.OPENROUTER_MODEL);
   }
 
   return null;
@@ -157,13 +173,6 @@ function applyTransportDefaults(
     const codexCliPath = normalizeString(env.CODEX_CLI_PATH);
     if (codexCliPath && options.codexCliPath == null) {
       return { ...options, codexCliPath };
-    }
-  }
-
-  if (transport === RuntimeTransport.API) {
-    const agentApiBaseUrl = normalizeString(env.AGENTAPI_BASE_URL);
-    if (agentApiBaseUrl && options.agentApiBaseUrl == null) {
-      return { ...options, agentApiBaseUrl };
     }
   }
 
@@ -239,6 +248,7 @@ export function resolveRuntimeProfile(input: ResolveRuntimeProfileInput): Resolv
       ? null
       : (normalizeString(input.modelOverride) ??
         normalizeString(profile?.defaultModel) ??
+        normalizeString(input.lightModelFallback) ??
         inferDefaultModel(runtimeId, providerId, env));
   const headers = profile?.headers ?? {};
   const mergedOptions = mergeRuntimeOptions(profile?.options, input.runtimeOptionsOverride);
@@ -297,7 +307,7 @@ export function validateResolvedRuntimeProfile(
       );
     }
     if (!resolved.baseUrl && typeof resolved.options.agentApiBaseUrl !== "string") {
-      warnings.push("API transport requires a base URL (set profile baseUrl or AGENTAPI_BASE_URL)");
+      warnings.push("API transport requires a base URL (set profile baseUrl or OPENAI_BASE_URL)");
     }
   }
 

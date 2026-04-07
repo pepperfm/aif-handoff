@@ -190,11 +190,18 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   const modelOverride =
     options.modelOverride ?? (suppressModelFallback ? null : (task?.modelOverride ?? null));
 
+  // Resolve adapter early to get lightModel for the resolution chain:
+  // modelOverride → profile.defaultModel → lightModel → env default
+  const registry = await getRuntimeRegistry();
+  const effectiveRuntimeId = effective.profile?.runtimeId ?? getEnv().AIF_DEFAULT_RUNTIME_ID;
+  const adapter = registry.resolveRuntime(effectiveRuntimeId);
+
   const resolved = resolveRuntimeProfile({
     source: effective.source,
     profile: effective.profile,
     workflow,
     modelOverride,
+    lightModelFallback: adapter.descriptor.lightModel ?? null,
     suppressModelFallback,
     runtimeOptionsOverride,
     fallbackRuntimeId: getEnv().AIF_DEFAULT_RUNTIME_ID,
@@ -212,9 +219,6 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       },
     },
   });
-
-  const registry = await getRuntimeRegistry();
-  const adapter = registry.resolveRuntime(resolved.runtimeId);
 
   // Use transport-aware capabilities — adapters like Codex expose different
   // capabilities depending on the active transport (SDK vs CLI vs API).

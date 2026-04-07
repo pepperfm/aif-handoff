@@ -54,6 +54,8 @@ export interface RuntimeDescriptor {
   lightModel?: string | null;
   /** Default API key env var name (e.g. "ANTHROPIC_API_KEY", "OPENAI_API_KEY"). Used for UI hints and inference. */
   defaultApiKeyEnvVar?: string;
+  /** Default base URL env var name (e.g. "OPENAI_BASE_URL"). Used for UI placeholder hints. */
+  defaultBaseUrlEnvVar?: string;
   /** Placeholder model name for UI (e.g. "claude-sonnet-4-5", "gpt-5.4"). */
   defaultModelPlaceholder?: string;
   /** Transports this adapter supports. Used by UI to filter the transport selector. */
