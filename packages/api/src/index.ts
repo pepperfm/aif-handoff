@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serve } from "@hono/node-server";
 import { logger, getEnv } from "@aif/shared";
 import { listProjects, listRuntimeProfiles, listStaleInProgressTasks } from "@aif/data";
 import { projectsRouter } from "./routes/projects.js";
@@ -11,6 +10,7 @@ import { runtimeProfilesRouter } from "./routes/runtimeProfiles.js";
 import { setupWebSocket } from "./ws.js";
 import { requestLogger } from "./middleware/logger.js";
 import { getApiRuntimeRegistry } from "./services/runtime.js";
+import { startServer } from "./serverBootstrap.js";
 
 const log = logger("server");
 const startTime = Date.now();
@@ -121,12 +121,11 @@ const port = Number(process.env.PORT) || 3009;
 // Ensure data layer / DB is ready
 listProjects();
 
-const server = serve({ fetch: app.fetch, port }, () => {
-  log.info({ port }, "API server started");
+const server = startServer({
+  fetch: app.fetch,
+  port,
+  injectWebSocket,
+  logger: log,
 });
 
-// Inject WebSocket into the running server
-injectWebSocket(server);
-log.debug("WebSocket injected into server");
-
-export { app };
+export { app, server };

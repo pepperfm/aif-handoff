@@ -227,6 +227,13 @@ export interface RuntimeModelListInput {
   providerId?: string;
   profileId?: string | null;
   projectRoot?: string;
+  model?: string;
+  transport?: RuntimeTransport;
+  headers?: Record<string, string>;
+  options?: Record<string, unknown>;
+  baseUrl?: string | null;
+  apiKeyEnvVar?: string | null;
+  apiKey?: string | null;
 }
 
 export interface RuntimeMcpInput {
