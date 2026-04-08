@@ -48,6 +48,7 @@ coverage/
 .playwright-mcp/
 
 # Claude Code
+.claude/
 .claude/settings.local.json
 .claude/projects
 .claude/worktrees
@@ -58,7 +59,9 @@ coverage/
 /.github/skills
 
 # AI Factory (keep tracked files, ignore generated)
+.ai-factory.json
 .ai-factory/skill-context/
+.mcp.json
 
 # HTML docs (generated)
 docs-html/

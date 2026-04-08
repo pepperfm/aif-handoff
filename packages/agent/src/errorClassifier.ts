@@ -10,6 +10,8 @@ const EXTERNAL_FAILURE_PATTERNS: string[] = [
   "out of extra usage",
   "rate limit",
   "quota",
+  "at capacity",
+  "model is at capacity",
   "credits",
   "exited with code 1",
   "timed out",

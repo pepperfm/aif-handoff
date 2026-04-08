@@ -7,6 +7,7 @@ describe("isExternalFailure", () => {
     "Usage limit exceeded",
     "You're out of extra usage · resets 3pm",
     "Rate limit reached",
+    "Selected model is at capacity. Please try a different model",
     "Insufficient quota remaining",
     "No credits available",
     "Process exited with code 1",
