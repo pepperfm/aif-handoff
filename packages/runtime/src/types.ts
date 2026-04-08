@@ -60,6 +60,18 @@ export interface RuntimeDescriptor {
   defaultModelPlaceholder?: string;
   /** Transports this adapter supports. Used by UI to filter the transport selector. */
   supportedTransports?: RuntimeTransport[];
+  /**
+   * Prefix character for skill/slash command invocations.
+   * Claude uses "/" (default), Codex uses "$".
+   * Used by promptPolicy to transform skill commands before sending to the runtime.
+   */
+  skillCommandPrefix?: string;
+  /**
+   * Whether this runtime is supported by `ai-factory init --agents`.
+   * Only runtimes with this flag are passed to the init command.
+   * API-only runtimes (e.g. OpenRouter) that have no local agent tooling should set this to false or omit it.
+   */
+  supportsProjectInit?: boolean;
 }
 
 /** Generic tool-use callback — adapter converts its native format to this. */

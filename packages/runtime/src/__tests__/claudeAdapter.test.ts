@@ -222,6 +222,7 @@ describe("Claude runtime adapter", () => {
     expect(adapter.descriptor.id).toBe("claude-custom");
     expect(adapter.descriptor.providerId).toBe("anthropic-compatible");
     expect(adapter.descriptor.displayName).toBe("Claude Custom");
+    expect(adapter.descriptor.skillCommandPrefix).toBeUndefined();
   });
 
   it("returns runtime output/session/usage for successful runs", async () => {

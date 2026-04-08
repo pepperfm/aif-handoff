@@ -88,6 +88,7 @@ export {
 
 export {
   resolveRuntimePromptPolicy,
+  transformSkillCommandPrefix,
   type RuntimePromptPolicyInput,
   type RuntimePromptPolicyLogger,
   type RuntimePromptPolicyResult,
