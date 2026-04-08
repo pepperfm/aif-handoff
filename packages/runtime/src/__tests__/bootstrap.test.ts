@@ -2,13 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import { bootstrapRuntimeRegistry } from "../bootstrap.js";
 
 describe("bootstrapRuntimeRegistry", () => {
-  it("creates registry with built-in claude and codex adapters", async () => {
+  it("creates registry with built-in claude, codex, opencode, and openrouter adapters", async () => {
     const registry = await bootstrapRuntimeRegistry();
     const runtimes = registry.listRuntimes();
 
-    expect(runtimes.length).toBeGreaterThanOrEqual(2);
+    expect(runtimes.length).toBeGreaterThanOrEqual(4);
     expect(runtimes.find((r) => r.id === "claude")).toBeDefined();
     expect(runtimes.find((r) => r.id === "codex")).toBeDefined();
+    expect(runtimes.find((r) => r.id === "opencode")).toBeDefined();
+    expect(runtimes.find((r) => r.id === "openrouter")).toBeDefined();
   });
 
   it("claude adapter has expected capabilities", async () => {
@@ -28,6 +30,19 @@ describe("bootstrapRuntimeRegistry", () => {
     expect(codex.descriptor.capabilities.supportsResume).toBe(true);
     expect(codex.descriptor.capabilities.supportsSessionList).toBe(false);
     expect(codex.descriptor.lightModel).toBeNull();
+  });
+
+  it("openrouter adapter has expected capabilities", async () => {
+    const registry = await bootstrapRuntimeRegistry();
+    const openrouter = registry.resolveRuntime("openrouter");
+
+    expect(openrouter.descriptor.capabilities.supportsResume).toBe(false);
+    expect(openrouter.descriptor.capabilities.supportsSessionList).toBe(false);
+    expect(openrouter.descriptor.capabilities.supportsStreaming).toBe(true);
+    expect(openrouter.descriptor.capabilities.supportsModelDiscovery).toBe(true);
+    expect(openrouter.descriptor.capabilities.supportsCustomEndpoint).toBe(true);
+    expect(openrouter.descriptor.defaultTransport).toBe("api");
+    expect(openrouter.descriptor.lightModel).toBeNull();
   });
 
   it("passes logger to registry", async () => {
@@ -58,4 +73,16 @@ describe("bootstrapRuntimeRegistry", () => {
     expect(a).not.toBe(b);
     expect(a.listRuntimes().length).toBe(b.listRuntimes().length);
   });
+});
+it("opencode adapter has expected capabilities", async () => {
+  const registry = await bootstrapRuntimeRegistry();
+  const opencode = registry.resolveRuntime("opencode");
+
+  expect(opencode.descriptor.capabilities.supportsResume).toBe(true);
+  expect(opencode.descriptor.capabilities.supportsSessionList).toBe(true);
+  expect(opencode.descriptor.capabilities.supportsStreaming).toBe(true);
+  expect(opencode.descriptor.capabilities.supportsModelDiscovery).toBe(true);
+  expect(opencode.descriptor.capabilities.supportsCustomEndpoint).toBe(true);
+  expect(opencode.descriptor.defaultTransport).toBe("api");
+  expect(opencode.descriptor.lightModel).toBeNull();
 });

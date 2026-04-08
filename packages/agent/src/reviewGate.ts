@@ -1,5 +1,5 @@
 import { createRuntimeWorkflowSpec } from "@aif/runtime";
-import { executeSubagentQuery, resolveAdapterForTask } from "./subagentQuery.js";
+import { executeSubagentQuery } from "./subagentQuery.js";
 
 type ReviewGateResult = { status: "success" } | { status: "request_changes"; fixes: string };
 
@@ -14,8 +14,6 @@ const SUCCESS_TOKEN = "SUCCESS";
 export async function evaluateReviewCommentsForAutoMode(
   input: ReviewGateInput,
 ): Promise<ReviewGateResult> {
-  const adapter = await resolveAdapterForTask(input.taskId, "review");
-  const lightModel = adapter.descriptor.lightModel ?? null;
   const normalizedComments = (input.reviewComments ?? "").trim();
   const prompt = `Read the review comments and extract only the points that must be fixed.
 
@@ -46,8 +44,6 @@ Rules:
     prompt,
     workflowSpec,
     workflowKind: "review-gate",
-    modelOverride: lightModel,
-    suppressModelFallback: lightModel === null,
     systemPromptAppend: "Do not use tools or subagents. Reply directly in plain text.",
   });
 

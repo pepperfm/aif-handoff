@@ -254,6 +254,7 @@ export function AddTaskForm({ projectId }: Props) {
       {!isFix && (
         <div className="space-y-2">
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={() => setShowAdvanced((v) => !v)}
@@ -310,6 +311,7 @@ export function AddTaskForm({ projectId }: Props) {
       </div>
       <div className="space-y-2">
         <Button
+          type="button"
           variant="outline"
           size="sm"
           onClick={() => setRuntimeOverrideOpen((v) => !v)}

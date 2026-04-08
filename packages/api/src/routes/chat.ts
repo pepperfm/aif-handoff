@@ -5,6 +5,7 @@ import {
   createRuntimeWorkflowSpec,
   getResultSessionId,
   isRuntimeErrorCategory,
+  RUNTIME_TRUST_TOKEN,
   resolveAdapterCapabilities,
   RuntimeTransport,
   type RuntimeAdapter,
@@ -32,6 +33,7 @@ import {
   listChatSessions,
   toChatMessageResponse,
   toChatSessionResponse,
+  toRuntimeProfileResponse,
   toTaskResponse,
   updateChatSession,
   updateChatSessionTimestamp,
@@ -39,6 +41,7 @@ import {
 import { chatRequestSchema, createChatSessionSchema, updateChatSessionSchema } from "../schemas.js";
 import { persistAttachments } from "../services/attachmentPersistence.js";
 import { readAttachment } from "../services/attachmentStorage.js";
+import { getCodexExecutionHooks } from "../services/codexExecutionHooks.js";
 import { broadcast, sendToClient } from "../ws.js";
 import {
   getCached,
@@ -324,6 +327,13 @@ chatRouter.get("/sessions", async (c) => {
           profileId: context.resolvedProfile.profileId,
           projectRoot: project.rootPath,
           limit: 50,
+          options: {
+            ...context.resolvedProfile.options,
+            ...(context.resolvedProfile.baseUrl
+              ? { baseUrl: context.resolvedProfile.baseUrl }
+              : {}),
+          },
+          headers: context.resolvedProfile.headers,
         });
         setCached(cacheKey, listed);
       }
@@ -489,13 +499,20 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
     let runtimeId = getEnv().AIF_DEFAULT_RUNTIME_ID;
     let providerId = getEnv().AIF_DEFAULT_PROVIDER_ID;
     let profileId = session.runtimeProfileId ?? null;
+    let profileOptions: Record<string, unknown> | undefined;
+    let profileHeaders: Record<string, string> | undefined;
+    let profileBaseUrl: string | null = null;
 
     if (session.runtimeProfileId) {
-      const profile = findRuntimeProfileById(session.runtimeProfileId);
-      if (profile) {
+      const profileRow = findRuntimeProfileById(session.runtimeProfileId);
+      if (profileRow) {
+        const profile = toRuntimeProfileResponse(profileRow);
         runtimeId = profile.runtimeId;
         providerId = profile.providerId;
         profileId = profile.id;
+        profileOptions = profile.options;
+        profileHeaders = profile.headers;
+        profileBaseUrl = profile.baseUrl ?? null;
       }
     }
 
@@ -508,6 +525,11 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
           profileId,
           projectRoot: project.rootPath,
           sessionId: linkedRuntimeSessionId,
+          options: {
+            ...(profileOptions ?? {}),
+            ...(profileBaseUrl ? { baseUrl: profileBaseUrl } : {}),
+          },
+          headers: profileHeaders,
         });
 
         // Merge DB attachment metadata into runtime messages (attachments are persisted locally)
@@ -788,19 +810,27 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           ? { apiKeyEnvVar: runtimeContext.resolvedProfile.apiKeyEnvVar }
           : {}),
       },
-      metadata: {
-        permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
-        allowDangerouslySkipPermissions: bypassPermissions,
-        settings: { attribution: { commit: "", pr: "" } },
-        settingSources: ["project"],
+      execution: {
         includePartialMessages: true,
         maxTurns: 20,
+        onEvent: onRuntimeEvent,
+        systemPromptAppend: systemAppend,
         environment: {
           HANDOFF_MODE: "1",
           ...(taskId ? { HANDOFF_TASK_ID: taskId } : {}),
         },
-        systemPromptAppend: systemAppend,
-        onEvent: onRuntimeEvent,
+        hooks: {
+          ...getCodexExecutionHooks({
+            runtimeId,
+            transport: runtimeContext.resolvedProfile.transport,
+            bypassPermissions,
+          }),
+          permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
+          allowDangerouslySkipPermissions: bypassPermissions,
+          _trustToken: RUNTIME_TRUST_TOKEN,
+          settings: { attribution: { commit: "", pr: "" } },
+          settingSources: ["project"],
+        },
       },
     };
 
@@ -845,8 +875,8 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       sendToken(result.outputText);
     }
 
-    // Persist assistant response only for non-resume sessions to avoid duplicates in external stores
-    if (chatSessionId && fullAssistantResponse && !resumeRuntimeSessionId) {
+    // Persist assistant response in local chat history for both fresh and resumed runtime sessions.
+    if (chatSessionId && fullAssistantResponse) {
       createChatMessage({
         sessionId: chatSessionId,
         role: "assistant",

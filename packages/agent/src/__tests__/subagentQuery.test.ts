@@ -75,7 +75,6 @@ vi.mock("@aif/shared", async (importOriginal) => {
       OPENAI_API_KEY: undefined,
       OPENAI_BASE_URL: undefined,
       CODEX_CLI_PATH: undefined,
-      AGENTAPI_BASE_URL: undefined,
       AIF_RUNTIME_MODULES: [],
       AIF_DEFAULT_RUNTIME_ID: "claude",
       AIF_DEFAULT_PROVIDER_ID: "anthropic",
@@ -367,7 +366,7 @@ describe("executeSubagentQuery model fallback policy", () => {
     });
   });
 
-  it("uses task/profile model fallback when suppression is disabled", async () => {
+  it("uses task modelOverride as highest priority", async () => {
     queryMock.mockImplementation(makeDelayedSuccess(0, "ok"));
 
     await executeSubagentQuery({
@@ -376,12 +375,65 @@ describe("executeSubagentQuery model fallback policy", () => {
       agentName: "review-gate",
       prompt: "check",
       workflowKind: "review-gate",
-      modelOverride: null,
-      suppressModelFallback: false,
     });
 
     const callOptions = queryMock.mock.calls[0][0].options as Record<string, unknown>;
     expect(callOptions.model).toBe("task-model");
+  });
+
+  it("uses profile defaultModel when no task override", async () => {
+    findTaskByIdMock.mockReturnValue({
+      id: "task-1",
+      projectId: "project-1",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+    queryMock.mockImplementation(makeDelayedSuccess(0, "ok"));
+
+    await executeSubagentQuery({
+      taskId: "task-1",
+      projectRoot: "/tmp/project",
+      agentName: "review-gate",
+      prompt: "check",
+      workflowKind: "review-gate",
+    });
+
+    const callOptions = queryMock.mock.calls[0][0].options as Record<string, unknown>;
+    expect(callOptions.model).toBe("profile-model");
+  });
+
+  it("uses adapter lightModel when no task override and no profile model", async () => {
+    // Claude adapter has lightModel: "haiku"
+    findTaskByIdMock.mockReturnValue({
+      id: "task-1",
+      projectId: "project-1",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+    resolveEffectiveRuntimeProfileMock.mockReturnValue({
+      source: "none",
+      profile: {
+        id: "profile-1",
+        runtimeId: "claude",
+        providerId: "anthropic",
+        defaultModel: null,
+      },
+      taskRuntimeProfileId: null,
+      projectRuntimeProfileId: null,
+      systemRuntimeProfileId: null,
+    });
+    queryMock.mockImplementation(makeDelayedSuccess(0, "ok"));
+
+    await executeSubagentQuery({
+      taskId: "task-1",
+      projectRoot: "/tmp/project",
+      agentName: "review-gate",
+      prompt: "check",
+      workflowKind: "review-gate",
+    });
+
+    const callOptions = queryMock.mock.calls[0][0].options as Record<string, unknown>;
+    expect(callOptions.model).toBe("haiku");
   });
 
   it("omits model entirely when suppression is enabled", async () => {

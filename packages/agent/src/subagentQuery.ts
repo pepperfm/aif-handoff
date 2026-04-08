@@ -190,11 +190,18 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
   const modelOverride =
     options.modelOverride ?? (suppressModelFallback ? null : (task?.modelOverride ?? null));
 
+  // Resolve adapter early to get lightModel for the resolution chain:
+  // modelOverride → profile.defaultModel → lightModel → env default
+  const registry = await getRuntimeRegistry();
+  const effectiveRuntimeId = effective.profile?.runtimeId ?? getEnv().AIF_DEFAULT_RUNTIME_ID;
+  const adapter = registry.resolveRuntime(effectiveRuntimeId);
+
   const resolved = resolveRuntimeProfile({
     source: effective.source,
     profile: effective.profile,
     workflow,
     modelOverride,
+    lightModelFallback: adapter.descriptor.lightModel ?? null,
     suppressModelFallback,
     runtimeOptionsOverride,
     fallbackRuntimeId: getEnv().AIF_DEFAULT_RUNTIME_ID,
@@ -212,9 +219,6 @@ async function resolveExecutionContext(options: SubagentQueryOptions): Promise<{
       },
     },
   });
-
-  const registry = await getRuntimeRegistry();
-  const adapter = registry.resolveRuntime(resolved.runtimeId);
 
   // Use transport-aware capabilities — adapters like Codex expose different
   // capabilities depending on the active transport (SDK vs CLI vs API).
@@ -373,7 +377,7 @@ export async function executeSubagentQuery(
     logActivity(
       taskId,
       "Agent",
-      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, profile=${context.profileId ?? "default"}, model=${context.model ?? "default"})`,
+      `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"})`,
     );
     const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
@@ -420,6 +424,9 @@ export async function executeSubagentQuery(
       headers: context.headers,
       options: context.options,
       execution: executionIntent,
+      metadata: {
+        timeoutMs: getEnv().AGENT_STAGE_RUN_TIMEOUT_MS,
+      },
     } as const;
 
     const result =
@@ -468,7 +475,7 @@ export async function executeSubagentQuery(
     logActivity(
       taskId,
       "Agent",
-      `${agentName} complete (runtime=${context.runtimeId}, transport=${context.transport}, profile=${context.profileId ?? "default"}, model=${context.model ?? "default"})`,
+      `${agentName} complete (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"})`,
     );
 
     return { resultText };

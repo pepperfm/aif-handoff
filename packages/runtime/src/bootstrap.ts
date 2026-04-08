@@ -1,5 +1,7 @@
 import { createClaudeRuntimeAdapter } from "./adapters/claude/index.js";
 import { createCodexRuntimeAdapter } from "./adapters/codex/index.js";
+import { createOpenCodeRuntimeAdapter } from "./adapters/opencode/index.js";
+import { createOpenRouterRuntimeAdapter } from "./adapters/openrouter/index.js";
 import {
   createRuntimeRegistry,
   type RuntimeRegistry,
@@ -21,7 +23,12 @@ export async function bootstrapRuntimeRegistry(
   options: BootstrapRuntimeRegistryOptions = {},
 ): Promise<RuntimeRegistry> {
   const registry = createRuntimeRegistry({
-    builtInAdapters: [createClaudeRuntimeAdapter(), createCodexRuntimeAdapter()],
+    builtInAdapters: [
+      createClaudeRuntimeAdapter(),
+      createCodexRuntimeAdapter(),
+      createOpenCodeRuntimeAdapter(),
+      createOpenRouterRuntimeAdapter(),
+    ],
     logger: options.logger,
   });
 

@@ -14,9 +14,18 @@ const mockDefaultsData = {
     | { paths: { plan?: string; plans?: string }; workflow: Record<string, unknown> }
     | undefined,
 };
+const mockProjectsData = {
+  data: [{ id: "p-1", parallelEnabled: false }] as Array<Record<string, unknown>>,
+};
+const mockRuntimeProfilesData = {
+  data: [] as Array<Record<string, unknown>>,
+};
+const mockRuntimesData = {
+  data: [] as Array<Record<string, unknown>>,
+};
 
 vi.mock("@/hooks/useProjects", () => ({
-  useProjects: () => ({ data: [{ id: "p-1", parallelEnabled: false }] }),
+  useProjects: () => ({ data: mockProjectsData.data }),
 }));
 
 vi.mock("@/hooks/useSettings", () => ({
@@ -25,8 +34,8 @@ vi.mock("@/hooks/useSettings", () => ({
 }));
 
 vi.mock("@/hooks/useRuntimeProfiles", () => ({
-  useRuntimeProfiles: () => ({ data: [] }),
-  useRuntimes: () => ({ data: [] }),
+  useRuntimeProfiles: () => ({ data: mockRuntimeProfilesData.data }),
+  useRuntimes: () => ({ data: mockRuntimesData.data }),
 }));
 
 vi.mock("@/hooks/useTasks", () => ({
@@ -43,6 +52,9 @@ describe("AddTaskForm", () => {
     mutateCreateTask.mockClear();
     mockSettingsData.data = { useSubagents: true, maxReviewIterations: 3 };
     mockDefaultsData.data = undefined;
+    mockProjectsData.data = [{ id: "p-1", parallelEnabled: false }];
+    mockRuntimeProfilesData.data = [];
+    mockRuntimesData.data = [];
   });
 
   it("uses autoMode=true by default", () => {
@@ -254,6 +266,90 @@ describe("AddTaskForm", () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it("shows project-default runtime hint when project has default runtime profile", () => {
+    mockProjectsData.data = [
+      {
+        id: "p-1",
+        parallelEnabled: false,
+        defaultTaskRuntimeProfileId: "rp-default",
+      },
+    ];
+
+    render(<AddTaskForm projectId="p-1" />);
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
+
+    expect(screen.getByText("(project default)")).toBeDefined();
+  });
+
+  it("submits selected runtime profile and trimmed model override", () => {
+    mockRuntimeProfilesData.data = [
+      {
+        id: "rp-1",
+        name: "OpenRouter fast",
+        runtimeId: "openrouter",
+        providerId: "openrouter",
+      },
+    ];
+    mockRuntimesData.data = [
+      {
+        id: "openrouter",
+        capabilities: { supportsAgentDefinitions: true },
+      },
+    ];
+
+    render(<AddTaskForm projectId="p-1" />);
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "rp-1" } });
+    fireEvent.change(screen.getByPlaceholderText("runtime default"), {
+      target: { value: "  openai/gpt-4o-mini  " },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Task title"), {
+      target: { value: "Task with selected runtime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(mutateCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeProfileId: "rp-1",
+        modelOverride: "openai/gpt-4o-mini",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("shows subagent support warning for runtime without agent definitions", () => {
+    mockRuntimeProfilesData.data = [
+      {
+        id: "rp-1",
+        name: "OpenRouter profile",
+        runtimeId: "openrouter",
+        providerId: "openrouter",
+      },
+    ];
+    mockRuntimesData.data = [
+      {
+        id: "openrouter",
+        capabilities: { supportsAgentDefinitions: false },
+      },
+    ];
+
+    render(<AddTaskForm projectId="p-1" />);
+
+    fireEvent.click(screen.getByText("Add task"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime override" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "rp-1" } });
+
+    expect(
+      screen.getByText(
+        "This runtime does not support subagents — skills mode will be used instead.",
+      ),
+    ).toBeDefined();
   });
 
   it("submits planner settings from advanced options", () => {

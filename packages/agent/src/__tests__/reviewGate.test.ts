@@ -1,15 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { executeSubagentQueryMock, resolveAdapterForTaskMock } = vi.hoisted(() => ({
+const { executeSubagentQueryMock } = vi.hoisted(() => ({
   executeSubagentQueryMock: vi.fn(),
-  resolveAdapterForTaskMock: vi.fn().mockResolvedValue({
-    descriptor: { lightModel: "claude-haiku-3-5" },
-  }),
 }));
 
 vi.mock("../subagentQuery.js", () => ({
   executeSubagentQuery: executeSubagentQueryMock,
-  resolveAdapterForTask: resolveAdapterForTaskMock,
 }));
 
 import { evaluateReviewCommentsForAutoMode } from "../reviewGate.js";
@@ -99,38 +95,14 @@ describe("evaluateReviewCommentsForAutoMode", () => {
     expect(result).toEqual({ status: "success" });
   });
 
-  it("uses adapter lightModel for review-gate model override", async () => {
+  it("delegates model resolution to subagentQuery (no modelOverride)", async () => {
     executeSubagentQueryMock.mockResolvedValueOnce({ resultText: "SUCCESS" });
 
     await evaluateReviewCommentsForAutoMode(baseInput);
 
-    expect(executeSubagentQueryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelOverride: "claude-haiku-3-5",
-        suppressModelFallback: false,
-        workflowSpec: expect.objectContaining({
-          sessionReusePolicy: "never",
-        }),
-      }),
-    );
-  });
-
-  it("suppresses model fallback when adapter has no lightModel", async () => {
-    resolveAdapterForTaskMock.mockResolvedValueOnce({
-      descriptor: { lightModel: null },
-    });
-    executeSubagentQueryMock.mockResolvedValueOnce({ resultText: "SUCCESS" });
-
-    await evaluateReviewCommentsForAutoMode(baseInput);
-
-    expect(executeSubagentQueryMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelOverride: null,
-        suppressModelFallback: true,
-        workflowSpec: expect.objectContaining({
-          sessionReusePolicy: "never",
-        }),
-      }),
-    );
+    const call = executeSubagentQueryMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(call.modelOverride).toBeUndefined();
+    expect(call.suppressModelFallback).toBeUndefined();
+    expect(call.workflowSpec).toEqual(expect.objectContaining({ sessionReusePolicy: "never" }));
   });
 });

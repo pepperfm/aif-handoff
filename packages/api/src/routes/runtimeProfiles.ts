@@ -172,6 +172,10 @@ runtimeProfilesRouter.get("/runtimes", async (c) => {
       capabilities: runtime.capabilities,
       defaultTransport: runtime.defaultTransport ?? null,
       defaultApiKeyEnvVar: runtime.defaultApiKeyEnvVar ?? null,
+      defaultBaseUrlEnvVar: runtime.defaultBaseUrlEnvVar ?? null,
+      defaultBaseUrl: runtime.defaultBaseUrlEnvVar
+        ? (process.env[runtime.defaultBaseUrlEnvVar] ?? null)
+        : null,
       defaultModelPlaceholder: runtime.defaultModelPlaceholder ?? null,
       supportedTransports: runtime.supportedTransports ?? [],
     })),
@@ -379,7 +383,7 @@ runtimeProfilesRouter.post(
       modelOverride: body.modelOverride ?? null,
       runtimeOptionsOverride: body.runtimeOptions ?? null,
       allowDisabled: true,
-      env,
+      env: Object.keys(env).length > 0 ? env : undefined,
     });
 
     try {
@@ -462,7 +466,7 @@ runtimeProfilesRouter.post(
       modelOverride: body.modelOverride ?? null,
       runtimeOptionsOverride: body.runtimeOptions ?? null,
       allowDisabled: true,
-      env,
+      env: Object.keys(env).length > 0 ? env : undefined,
     });
 
     try {

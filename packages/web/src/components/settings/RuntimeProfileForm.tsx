@@ -434,8 +434,13 @@ export function RuntimeProfileForm({
           <Input
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://..."
+            placeholder={currentRuntime?.defaultBaseUrl ?? "https://..."}
           />
+          {currentRuntime?.defaultBaseUrlEnvVar && (
+            <p className="text-[11px] text-muted-foreground">
+              Leave empty to use {currentRuntime.defaultBaseUrlEnvVar} from env
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">API key env var</p>

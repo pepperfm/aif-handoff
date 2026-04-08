@@ -276,6 +276,8 @@ export interface RuntimeDescriptor {
   capabilities: Record<string, boolean>;
   defaultTransport?: string | null;
   defaultApiKeyEnvVar?: string | null;
+  defaultBaseUrlEnvVar?: string | null;
+  defaultBaseUrl?: string | null;
   defaultModelPlaceholder?: string | null;
   supportedTransports?: string[];
 }

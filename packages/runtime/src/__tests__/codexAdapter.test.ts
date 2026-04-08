@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runCodexCliMock = vi.fn();
 const runCodexAgentApiMock = vi.fn();
+const runCodexSdkMock = vi.fn();
 const validateCodexAgentApiConnectionMock = vi.fn();
 const listCodexAgentApiModelsMock = vi.fn();
 const listCodexAppServerModelsMock = vi.fn();
@@ -26,6 +27,9 @@ vi.mock("../adapters/codex/modelDiscovery.js", async () => {
     listCodexAppServerModels: (...args: unknown[]) => listCodexAppServerModelsMock(...args),
   };
 });
+vi.mock("../adapters/codex/sdk.js", () => ({
+  runCodexSdk: (...args: unknown[]) => runCodexSdkMock(...args),
+}));
 
 const { createCodexRuntimeAdapter } = await import("../adapters/codex/index.js");
 
@@ -45,12 +49,14 @@ describe("Codex runtime adapter", () => {
   beforeEach(() => {
     runCodexCliMock.mockReset();
     runCodexAgentApiMock.mockReset();
+    runCodexSdkMock.mockReset();
     validateCodexAgentApiConnectionMock.mockReset();
     runCodexCliMock.mockResolvedValue({ outputText: "cli-output", sessionId: "cli-session" });
     runCodexAgentApiMock.mockResolvedValue({
       outputText: "agentapi-output",
       sessionId: "agentapi-session",
     });
+    runCodexSdkMock.mockResolvedValue({ outputText: "sdk-output", sessionId: "sdk-session" });
     validateCodexAgentApiConnectionMock.mockResolvedValue({
       ok: true,
       message: "agentapi ok",
@@ -69,6 +75,7 @@ describe("Codex runtime adapter", () => {
     expect(adapter.descriptor.capabilities.supportsModelDiscovery).toBe(true);
     expect(adapter.descriptor.capabilities.supportsCustomEndpoint).toBe(true);
     expect(adapter.descriptor.capabilities.supportsAgentDefinitions).toBe(false);
+    expect(adapter.descriptor.capabilities.supportsSessionList).toBe(false);
   });
 
   it("runs via CLI transport by default", async () => {
@@ -89,6 +96,40 @@ describe("Codex runtime adapter", () => {
     expect(result.outputText).toBe("agentapi-output");
     expect(runCodexAgentApiMock).toHaveBeenCalledTimes(1);
     expect(runCodexCliMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back from CLI to API on websocket 500 even when API config is present", async () => {
+    runCodexCliMock.mockRejectedValueOnce(
+      new Error(
+        "Codex CLI exited with code 1: ... responses_websocket ... HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses",
+      ),
+    );
+    const adapter = createCodexRuntimeAdapter();
+    await expect(
+      adapter.run(
+        createRunInput({
+          options: {
+            apiKey: "sk-test",
+            baseUrl: "https://api.openai.com/v1",
+          },
+        }),
+      ),
+    ).rejects.toThrow(/responses_websocket/i);
+    expect(runCodexCliMock).toHaveBeenCalledTimes(1);
+    expect(runCodexAgentApiMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back when CLI fails but API config is missing", async () => {
+    runCodexCliMock.mockRejectedValueOnce(
+      new Error(
+        "Codex CLI exited with code 1: ... responses_websocket ... HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses",
+      ),
+    );
+    const adapter = createCodexRuntimeAdapter();
+
+    await expect(adapter.run(createRunInput())).rejects.toThrow(/responses_websocket/i);
+    expect(runCodexCliMock).toHaveBeenCalledTimes(1);
+    expect(runCodexAgentApiMock).not.toHaveBeenCalled();
   });
 
   it("resumes sessions using selected transport", async () => {

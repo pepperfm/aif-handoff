@@ -8,15 +8,20 @@ import type {
   RuntimeRunResult,
   RuntimeUsage,
 } from "../../types.js";
-import { classifyCodexRuntimeError } from "./errors.js";
+import { classifyOpenRouterRuntimeError } from "./errors.js";
 
-export interface CodexAgentApiLogger {
+export interface OpenRouterApiLogger {
   debug?(context: Record<string, unknown>, message: string): void;
   info?(context: Record<string, unknown>, message: string): void;
   warn?(context: Record<string, unknown>, message: string): void;
 }
 
-const DEFAULT_API_RETRY_COUNT = 2;
+const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_APP_TITLE = "AIF Handoff";
+const RETRYABLE_STATUS = new Set([429]);
+const MAX_429_ATTEMPTS = 3;
+
+const SENSITIVE_OPTION_KEYS = new Set(["apiKey", "apikey", "api_key", "secret", "password"]);
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -27,8 +32,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
-
-const SENSITIVE_OPTION_KEYS = new Set(["apiKey", "apikey", "api_key", "secret", "password"]);
 
 function stripSensitiveOptions(
   options: Record<string, unknown> | undefined,
@@ -43,31 +46,62 @@ function stripSensitiveOptions(
   return cleaned;
 }
 
-function resolveBaseUrl(input: RuntimeRunInput | RuntimeConnectionValidationInput): string {
-  const options = asRecord(input.options);
+// ---------------------------------------------------------------------------
+// URL / Auth / Header resolution
+// ---------------------------------------------------------------------------
+
+function resolveBaseUrl(
+  input: RuntimeRunInput | RuntimeConnectionValidationInput | RuntimeModelListInput,
+): string {
+  const options = asRecord((input as RuntimeRunInput).options);
   const baseUrl =
-    readString(options.agentApiBaseUrl) ??
-    readString(options.baseUrl) ??
-    readString(process.env.OPENAI_BASE_URL);
-  if (!baseUrl) {
-    throw classifyCodexRuntimeError("Codex API transport requires baseUrl or OPENAI_BASE_URL");
-  }
+    readString(options.baseUrl) ?? readString(process.env.OPENROUTER_BASE_URL) ?? DEFAULT_BASE_URL;
   return baseUrl.replace(/\/+$/, "");
 }
 
-function resolveApiKey(input: RuntimeRunInput | RuntimeConnectionValidationInput): string | null {
-  const options = asRecord(input.options);
-  return readString(options.apiKey) ?? readString(process.env.OPENAI_API_KEY);
+function resolveApiKey(
+  input: RuntimeRunInput | RuntimeConnectionValidationInput | RuntimeModelListInput,
+): string | null {
+  const options = asRecord((input as RuntimeRunInput).options);
+  return readString(options.apiKey) ?? readString(process.env.OPENROUTER_API_KEY);
 }
 
-function buildHeaders(input: RuntimeRunInput | RuntimeConnectionValidationInput): Headers {
+function resolveHttpReferer(
+  input: RuntimeRunInput | RuntimeConnectionValidationInput | RuntimeModelListInput,
+): string {
+  const options = asRecord((input as RuntimeRunInput).options);
+  return readString(options.httpReferer) ?? readString(process.env.OPENROUTER_HTTP_REFERER) ?? "";
+}
+
+function resolveAppTitle(
+  input: RuntimeRunInput | RuntimeConnectionValidationInput | RuntimeModelListInput,
+): string {
+  const options = asRecord((input as RuntimeRunInput).options);
+  return (
+    readString(options.appTitle) ??
+    readString(process.env.OPENROUTER_APP_TITLE) ??
+    DEFAULT_APP_TITLE
+  );
+}
+
+function buildHeaders(
+  input: RuntimeRunInput | RuntimeConnectionValidationInput | RuntimeModelListInput,
+): Headers {
   const headers = new Headers({ "Content-Type": "application/json" });
   const apiKey = resolveApiKey(input);
   if (apiKey) {
     headers.set("Authorization", `Bearer ${apiKey}`);
   }
+  const referer = resolveHttpReferer(input);
+  if (referer) {
+    headers.set("HTTP-Referer", referer);
+  }
+  const appTitle = resolveAppTitle(input);
+  if (appTitle) {
+    headers.set("X-Title", appTitle);
+  }
 
-  const rawHeaders = asRecord(asRecord(input.options).headers);
+  const rawHeaders = asRecord(asRecord((input as RuntimeRunInput).options).headers);
   for (const [key, value] of Object.entries(rawHeaders)) {
     if (typeof value === "string") {
       headers.set(key, value);
@@ -77,103 +111,8 @@ function buildHeaders(input: RuntimeRunInput | RuntimeConnectionValidationInput)
   return headers;
 }
 
-function resolveApiRetryCount(input: RuntimeRunInput): number {
-  const options = asRecord(input.options);
-  const fromOptions = options.apiRetryCount;
-  const fromEnv = process.env.CODEX_API_RETRY_COUNT;
-  const raw =
-    typeof fromOptions === "number"
-      ? fromOptions
-      : typeof fromOptions === "string"
-        ? Number.parseInt(fromOptions, 10)
-        : fromEnv
-          ? Number.parseInt(fromEnv, 10)
-          : DEFAULT_API_RETRY_COUNT;
-
-  if (!Number.isFinite(raw) || raw < 0) {
-    return DEFAULT_API_RETRY_COUNT;
-  }
-  return Math.floor(raw);
-}
-
-function isRetryableStatus(status: number): boolean {
-  return status >= 500 && status < 600;
-}
-
-function isRetryableFetchError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes("fetch failed") ||
-    lowered.includes("network") ||
-    lowered.includes("econnreset") ||
-    lowered.includes("econnrefused") ||
-    lowered.includes("timed out") ||
-    lowered.includes("etimedout")
-  );
-}
-
-function retryBackoffMs(attempt: number): number {
-  return 150 * (attempt + 1);
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchWithRetries(
-  input: RuntimeRunInput,
-  url: string,
-  init: RequestInit,
-  logger: CodexAgentApiLogger | undefined,
-  requestType: "non-stream" | "stream",
-): Promise<Response> {
-  const maxRetries = resolveApiRetryCount(input);
-
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      const response = await fetch(url, init);
-      if (isRetryableStatus(response.status) && attempt < maxRetries) {
-        const delayMs = retryBackoffMs(attempt);
-        logger?.warn?.(
-          {
-            runtimeId: input.runtimeId,
-            status: response.status,
-            attempt: attempt + 1,
-            maxRetries,
-            delayMs,
-            requestType,
-          },
-          "OpenAI API returned retryable status, retrying",
-        );
-        await sleep(delayMs);
-        continue;
-      }
-      return response;
-    } catch (error) {
-      if (attempt < maxRetries && isRetryableFetchError(error)) {
-        const delayMs = retryBackoffMs(attempt);
-        logger?.warn?.(
-          {
-            runtimeId: input.runtimeId,
-            error: error instanceof Error ? error.message : String(error),
-            attempt: attempt + 1,
-            maxRetries,
-            delayMs,
-            requestType,
-          },
-          "OpenAI API request failed with retryable transport error, retrying",
-        );
-        await sleep(delayMs);
-        continue;
-      }
-      throw error;
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Messages & request body (OpenAI Chat Completions format)
+// Request body builders
 // ---------------------------------------------------------------------------
 
 interface ChatMessage {
@@ -239,13 +178,77 @@ function normalizeUsage(usage: unknown): RuntimeUsage | null {
   return { inputTokens, outputTokens, totalTokens, costUsd };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const asSeconds = Number(value);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+    return Math.floor(asSeconds * 1000);
+  }
+  const atMs = Date.parse(value);
+  if (!Number.isFinite(atMs)) return null;
+  return Math.max(0, atMs - Date.now());
+}
+
+function getBackoffMs(attempt: number): number {
+  // 1.5s, 3.0s for retries #1 and #2
+  return 1_500 * attempt;
+}
+
+async function postChatCompletionsWith429Retry(
+  input: RuntimeRunInput,
+  url: string,
+  stream: boolean,
+  logger?: OpenRouterApiLogger,
+): Promise<Response> {
+  for (let attempt = 1; attempt <= MAX_429_ATTEMPTS; attempt += 1) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: buildHeaders(input),
+      body: JSON.stringify(buildRequestBody(input, stream)),
+    });
+
+    const isRetryable = RETRYABLE_STATUS.has(response.status);
+    const hasAttemptsLeft = attempt < MAX_429_ATTEMPTS;
+    if (!isRetryable || !hasAttemptsLeft) {
+      return response;
+    }
+
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+    const backoffMs = retryAfterMs ?? getBackoffMs(attempt);
+    const rawText = await response.text();
+
+    logger?.warn?.(
+      {
+        runtimeId: input.runtimeId,
+        model: input.model ?? null,
+        status: response.status,
+        attempt,
+        nextAttempt: attempt + 1,
+        retryAfterMs: backoffMs,
+        retryAfterHeader: retryAfterHeader ?? null,
+        errorPreview: rawText.slice(0, 240),
+      },
+      "OpenRouter returned retryable 429, retrying request",
+    );
+
+    await sleep(backoffMs);
+  }
+
+  throw new Error("Unreachable: 429 retry loop exhausted");
+}
+
 // ---------------------------------------------------------------------------
-// Non-streaming run (OpenAI Chat Completions)
+// Non-streaming run
 // ---------------------------------------------------------------------------
 
-export async function runCodexAgentApi(
+export async function runOpenRouterApi(
   input: RuntimeRunInput,
-  logger?: CodexAgentApiLogger,
+  logger?: OpenRouterApiLogger,
 ): Promise<RuntimeRunResult> {
   const baseUrl = resolveBaseUrl(input);
   const url = `${baseUrl}/chat/completions`;
@@ -258,26 +261,16 @@ export async function runCodexAgentApi(
       model: input.model ?? null,
       options: stripSensitiveOptions(asRecord(input.options)),
     },
-    "Starting OpenAI API run",
+    "Starting OpenRouter API run",
   );
 
   try {
-    const response = await fetchWithRetries(
-      input,
-      url,
-      {
-        method: "POST",
-        headers: buildHeaders(input),
-        body: JSON.stringify(buildRequestBody(input, false)),
-      },
-      logger,
-      "non-stream",
-    );
+    const response = await postChatCompletionsWith429Retry(input, url, false, logger);
 
     const rawText = await response.text();
     if (!response.ok) {
       return Promise.reject(
-        classifyCodexRuntimeError(new Error(`OpenAI API HTTP ${response.status}: ${rawText}`)),
+        classifyOpenRouterRuntimeError(new Error(`OpenRouter HTTP ${response.status}: ${rawText}`)),
       );
     }
 
@@ -291,7 +284,7 @@ export async function runCodexAgentApi(
         hasOutput: outputText.length > 0,
         usage: payload.usage ?? null,
       },
-      "OpenAI API run completed",
+      "OpenRouter API run completed",
     );
 
     return {
@@ -301,17 +294,17 @@ export async function runCodexAgentApi(
       raw: payload,
     };
   } catch (error) {
-    throw classifyCodexRuntimeError(error);
+    throw classifyOpenRouterRuntimeError(error);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Streaming run (SSE, OpenAI Chat Completions)
+// Streaming run (SSE)
 // ---------------------------------------------------------------------------
 
-export async function runCodexAgentApiStreaming(
+export async function runOpenRouterApiStreaming(
   input: RuntimeRunInput,
-  logger?: CodexAgentApiLogger,
+  logger?: OpenRouterApiLogger,
 ): Promise<RuntimeRunResult> {
   const baseUrl = resolveBaseUrl(input);
   const url = `${baseUrl}/chat/completions`;
@@ -324,32 +317,22 @@ export async function runCodexAgentApiStreaming(
       model: input.model ?? null,
       streaming: true,
     },
-    "Starting OpenAI API streaming run",
+    "Starting OpenRouter API streaming run",
   );
 
   try {
-    const response = await fetchWithRetries(
-      input,
-      url,
-      {
-        method: "POST",
-        headers: buildHeaders(input),
-        body: JSON.stringify(buildRequestBody(input, true)),
-      },
-      logger,
-      "stream",
-    );
+    const response = await postChatCompletionsWith429Retry(input, url, true, logger);
 
     if (!response.ok) {
       const rawText = await response.text();
       return Promise.reject(
-        classifyCodexRuntimeError(new Error(`OpenAI API HTTP ${response.status}: ${rawText}`)),
+        classifyOpenRouterRuntimeError(new Error(`OpenRouter HTTP ${response.status}: ${rawText}`)),
       );
     }
 
     if (!response.body) {
       return Promise.reject(
-        classifyCodexRuntimeError(new Error("OpenAI API streaming response has no body")),
+        classifyOpenRouterRuntimeError(new Error("OpenRouter streaming response has no body")),
       );
     }
 
@@ -418,7 +401,7 @@ export async function runCodexAgentApiStreaming(
         outputLength: outputText.length,
         eventCount: events.length,
       },
-      "OpenAI API streaming run completed",
+      "OpenRouter API streaming run completed",
     );
 
     return {
@@ -429,7 +412,7 @@ export async function runCodexAgentApiStreaming(
       raw: { streaming: true, eventCount: events.length },
     };
   } catch (error) {
-    throw classifyCodexRuntimeError(error);
+    throw classifyOpenRouterRuntimeError(error);
   }
 }
 
@@ -437,7 +420,7 @@ export async function runCodexAgentApiStreaming(
 // Connection validation
 // ---------------------------------------------------------------------------
 
-export async function validateCodexAgentApiConnection(
+export async function validateOpenRouterApiConnection(
   input: RuntimeConnectionValidationInput,
 ): Promise<RuntimeConnectionValidationResult> {
   const baseUrl = resolveBaseUrl(input);
@@ -451,15 +434,15 @@ export async function validateCodexAgentApiConnection(
     if (!response.ok) {
       return {
         ok: false,
-        message: `OpenAI API health check failed with status ${response.status}`,
+        message: `OpenRouter health check failed with status ${response.status}`,
       };
     }
     return {
       ok: true,
-      message: "OpenAI API connection validated",
+      message: "OpenRouter API connection validated",
     };
   } catch (error) {
-    throw classifyCodexRuntimeError(error);
+    throw classifyOpenRouterRuntimeError(error);
   }
 }
 
@@ -467,7 +450,7 @@ export async function validateCodexAgentApiConnection(
 // Model discovery
 // ---------------------------------------------------------------------------
 
-export async function listCodexAgentApiModels(
+export async function listOpenRouterApiModels(
   input: RuntimeConnectionValidationInput | RuntimeModelListInput,
 ): Promise<RuntimeModel[]> {
   const inputWithOptions = input as RuntimeConnectionValidationInput;
@@ -481,8 +464,8 @@ export async function listCodexAgentApiModels(
     });
     if (!response.ok) {
       return Promise.reject(
-        classifyCodexRuntimeError(
-          new Error(`OpenAI API model listing failed with status ${response.status}`),
+        classifyOpenRouterRuntimeError(
+          new Error(`OpenRouter model listing failed with status ${response.status}`),
         ),
       );
     }
@@ -490,7 +473,8 @@ export async function listCodexAgentApiModels(
       data?: Array<{
         id: string;
         name?: string;
-        owned_by?: string;
+        context_length?: number;
+        pricing?: { prompt?: string; completion?: string };
       }>;
     };
     const models = payload.data ?? [];
@@ -498,9 +482,12 @@ export async function listCodexAgentApiModels(
       id: model.id,
       label: model.name ?? model.id,
       supportsStreaming: true,
-      metadata: { owned_by: model.owned_by },
+      metadata: {
+        contextLength: model.context_length,
+        pricing: model.pricing,
+      },
     }));
   } catch (error) {
-    throw classifyCodexRuntimeError(error);
+    throw classifyOpenRouterRuntimeError(error);
   }
 }
