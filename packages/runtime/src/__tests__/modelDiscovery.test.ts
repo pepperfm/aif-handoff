@@ -29,6 +29,14 @@ function createResolvedProfile(
   };
 }
 
+function createDiscoveryLogger() {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  };
+}
+
 describe("runtime model discovery service", () => {
   it("returns cached models on repeated calls", async () => {
     const listModelsMock = vi.fn(async (): Promise<RuntimeModel[]> => [{ id: "model-1" }]);
@@ -53,7 +61,12 @@ describe("runtime model discovery service", () => {
     };
 
     const registry = createRuntimeRegistry({ builtInAdapters: [adapter] });
-    const service = createRuntimeModelDiscoveryService({ registry, cacheTtlMs: 5_000 });
+    const logger = createDiscoveryLogger();
+    const service = createRuntimeModelDiscoveryService({
+      registry,
+      cacheTtlMs: 5_000,
+      logger,
+    });
     const resolved = createResolvedProfile();
 
     const first = await service.listModels(resolved);
@@ -62,6 +75,22 @@ describe("runtime model discovery service", () => {
     expect(first).toEqual([{ id: "model-1" }]);
     expect(second).toEqual([{ id: "model-1" }]);
     expect(listModelsMock).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ cacheHit: false, forceRefresh: false }),
+      "Running uncached runtime model discovery slow path",
+    );
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheHit: false,
+        forceRefresh: false,
+        discoveryDurationMs: expect.any(Number),
+      }),
+      "Runtime model discovery slow path completed",
+    );
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ cacheHit: true }),
+      "Returning cached runtime model list",
+    );
   });
 
   it("bypasses model cache when forceRefresh=true", async () => {
@@ -90,9 +119,11 @@ describe("runtime model discovery service", () => {
     };
 
     const registry = createRuntimeRegistry({ builtInAdapters: [adapter] });
+    const logger = createDiscoveryLogger();
     const service = createRuntimeModelDiscoveryService({
       registry,
       cache: createRuntimeMemoryCache({ defaultTtlMs: 10_000 }),
+      logger,
     });
     const resolved = createResolvedProfile();
 
@@ -102,6 +133,63 @@ describe("runtime model discovery service", () => {
     expect(first).toEqual([{ id: "model-1" }]);
     expect(refreshed).toEqual([{ id: "model-2" }]);
     expect(listModelsMock).toHaveBeenCalledTimes(2);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ cacheHit: false, forceRefresh: true }),
+      "Running uncached runtime model discovery slow path",
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("warns when slow path repeats before cache TTL elapses", async () => {
+    const listModelsMock = vi
+      .fn<() => Promise<RuntimeModel[]>>()
+      .mockResolvedValueOnce([{ id: "model-1" }])
+      .mockResolvedValueOnce([{ id: "model-1" }]);
+    const adapter: RuntimeAdapter = {
+      descriptor: {
+        id: "stub-runtime",
+        providerId: "stub-provider",
+        displayName: "Stub Runtime",
+        capabilities: {
+          supportsResume: true,
+          supportsSessionList: false,
+          supportsAgentDefinitions: false,
+          supportsStreaming: false,
+          supportsModelDiscovery: true,
+          supportsApprovals: false,
+          supportsCustomEndpoint: false,
+        },
+      },
+      run: async () => ({ outputText: "ok" }),
+      listModels: listModelsMock,
+      validateConnection: async () => ({ ok: true }),
+    };
+    const neverHitCache = {
+      get: vi.fn().mockReturnValue(null),
+      set: vi.fn(),
+      delete: vi.fn(),
+      clear: vi.fn(),
+    };
+    const logger = createDiscoveryLogger();
+    const registry = createRuntimeRegistry({ builtInAdapters: [adapter] });
+    const service = createRuntimeModelDiscoveryService({
+      registry,
+      cache: neverHitCache,
+      cacheTtlMs: 60_000,
+      logger,
+    });
+    const resolved = createResolvedProfile();
+
+    await service.listModels(resolved);
+    await service.listModels(resolved);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheTtlMs: 60_000,
+        elapsedSincePreviousSlowPathMs: expect.any(Number),
+      }),
+      "Runtime model discovery slow path repeated before cache TTL elapsed",
+    );
   });
 
   it("does not reuse cached model discovery results when auth-relevant inputs change", async () => {

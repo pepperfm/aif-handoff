@@ -360,9 +360,27 @@ export function createCodexRuntimeAdapter(
       }
 
       if (transport === RuntimeTransport.CLI || transport === RuntimeTransport.SDK) {
+        const slowPathStartedAt = Date.now();
+        logger.debug?.(
+          {
+            runtimeId: input.runtimeId,
+            profileId: input.profileId ?? null,
+            transport,
+          },
+          "DEBUG [runtime:codex] Running app-server model discovery slow path (cache miss at runtime service level)",
+        );
         try {
           const models = await listCodexAppServerModels({ ...input, transport }, logger);
           if (models.length > 0) {
+            logger.debug?.(
+              {
+                runtimeId: input.runtimeId,
+                profileId: input.profileId ?? null,
+                transport,
+                discoveryDurationMs: Date.now() - slowPathStartedAt,
+              },
+              "DEBUG [runtime:codex] Codex app-server model discovery slow path completed",
+            );
             return models;
           }
         } catch (error) {
@@ -371,6 +389,7 @@ export function createCodexRuntimeAdapter(
               runtimeId: input.runtimeId,
               profileId: input.profileId ?? null,
               transport,
+              discoveryDurationMs: Date.now() - slowPathStartedAt,
               error: error instanceof Error ? error.message : String(error),
             },
             "WARN [runtime:codex] Codex app-server model discovery failed, falling back to built-in list",

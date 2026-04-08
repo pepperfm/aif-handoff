@@ -98,6 +98,7 @@ export function createRuntimeModelDiscoveryService(
   const validationCache =
     options.validationCache ??
     createRuntimeMemoryCache<RuntimeConnectionValidationResult>({ defaultTtlMs: cacheTtlMs });
+  const modelSlowPathTracker = new Map<string, number>();
 
   return {
     async listModels(
@@ -115,6 +116,34 @@ export function createRuntimeModelDiscoveryService(
           return cached;
         }
       }
+      const slowPathStartedAt = Date.now();
+      options.logger?.debug?.(
+        {
+          runtimeId: resolved.runtimeId,
+          profileId: resolved.profileId,
+          cacheHit: false,
+          forceRefresh,
+          cacheTtlMs,
+        },
+        "Running uncached runtime model discovery slow path",
+      );
+      const previousSlowPathAt = modelSlowPathTracker.get(cacheKey);
+      if (
+        !forceRefresh &&
+        previousSlowPathAt != null &&
+        slowPathStartedAt - previousSlowPathAt < cacheTtlMs
+      ) {
+        options.logger?.warn?.(
+          {
+            runtimeId: resolved.runtimeId,
+            profileId: resolved.profileId,
+            cacheTtlMs,
+            elapsedSincePreviousSlowPathMs: slowPathStartedAt - previousSlowPathAt,
+          },
+          "Runtime model discovery slow path repeated before cache TTL elapsed",
+        );
+      }
+      modelSlowPathTracker.set(cacheKey, slowPathStartedAt);
 
       const adapter = options.registry.resolveRuntime(resolved.runtimeId);
       const capabilities = resolveAdapterCapabilities(adapter, resolved.transport);
@@ -153,6 +182,17 @@ export function createRuntimeModelDiscoveryService(
           apiKeyEnvVar: resolved.apiKeyEnvVar,
         });
         modelCache.set(cacheKey, models, cacheTtlMs);
+        const discoveryDurationMs = Date.now() - slowPathStartedAt;
+        options.logger?.debug?.(
+          {
+            runtimeId: resolved.runtimeId,
+            profileId: resolved.profileId,
+            cacheHit: false,
+            forceRefresh,
+            discoveryDurationMs,
+          },
+          "Runtime model discovery slow path completed",
+        );
         options.logger?.info?.(
           {
             runtimeId: resolved.runtimeId,
