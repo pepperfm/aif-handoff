@@ -8,7 +8,13 @@ vi.mock("@/hooks/useWebSocket", () => ({
 }));
 
 function stubHookModule(keys: string[]) {
-  const stub = () => ({ data: undefined, isLoading: false, mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false });
+  const stub = () => ({
+    data: undefined,
+    isLoading: false,
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
+    isPending: false,
+  });
   return Object.fromEntries(keys.map((key) => [key, vi.fn(stub)]));
 }
 
