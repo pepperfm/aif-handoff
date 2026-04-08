@@ -17,6 +17,7 @@ import { readStorage, writeStorage, removeStorage } from "./lib/storage";
 import { STORAGE_KEYS } from "./lib/storageKeys";
 import type { Project } from "@aif/shared/browser";
 import { ProjectRuntimeSettings } from "./components/project/ProjectRuntimeSettings";
+import { ToastProvider } from "./components/ui/toast";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -254,7 +255,9 @@ function AppContent() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
