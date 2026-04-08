@@ -26,4 +26,12 @@ describe("codex error classification", () => {
     expect(classified.adapterCode).toBe("CODEX_AUTH_ERROR");
     expect(classified.category).toBe("auth");
   });
+
+  it("classifies model capacity failures as rate limit", () => {
+    const classified = classifyCodexRuntimeError(
+      "Selected model is at capacity. Please try a different model",
+    );
+    expect(classified.adapterCode).toBe("CODEX_RATE_LIMIT");
+    expect(classified.category).toBe("rate_limit");
+  });
 });

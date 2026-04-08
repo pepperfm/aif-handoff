@@ -23,6 +23,8 @@ const RATE_LIMIT_PATTERNS = [
   "429",
   "insufficient_quota",
   "quota",
+  "at capacity",
+  "model is at capacity",
 ];
 
 function messageFromUnknown(error: unknown): string {
