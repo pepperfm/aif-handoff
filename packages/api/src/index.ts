@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { checkRuntimeReadiness } from "@aif/runtime";
 import { logger, getEnv } from "@aif/shared";
 import { listProjects, listRuntimeProfiles, listStaleInProgressTasks } from "@aif/data";
 import { projectsRouter } from "./routes/projects.js";
@@ -36,43 +35,6 @@ app.get("/health", (c) => {
     status: "ok",
     uptime: Math.floor((Date.now() - startTime) / 1000),
   });
-});
-
-app.get("/agent/readiness", async (c) => {
-  const enabledProfiles = listRuntimeProfiles({ enabledOnly: true });
-
-  try {
-    const registry = await getApiRuntimeRegistry();
-    const readiness = await checkRuntimeReadiness({
-      registry,
-      logger: {
-        debug(context, message) {
-          log.debug({ ...context }, message);
-        },
-        warn(context, message) {
-          log.warn({ ...context }, message);
-        },
-      },
-    });
-
-    return c.json({
-      ...readiness,
-      enabledRuntimeProfileCount: enabledProfiles.length,
-    });
-  } catch (error) {
-    log.error({ error }, "Failed to build runtime readiness payload");
-    return c.json(
-      {
-        ready: false,
-        runtimeCount: 0,
-        runtimes: [],
-        enabledRuntimeProfileCount: enabledProfiles.length,
-        message: "Failed to resolve runtime registry for readiness checks.",
-        checkedAt: new Date().toISOString(),
-      },
-      500,
-    );
-  }
 });
 
 // Agent status: running tasks, heartbeat lag, uptime
