@@ -183,7 +183,7 @@ After an agent starts (e.g. `implement-coordinator started`), the coordinator mo
 - If no tool activity arrives within `AGENT_FIRST_ACTIVITY_TIMEOUT_MS` (default 60s), the agent process is killed immediately and restarted.
 - Up to 2 automatic retries (3 attempts total). If all attempts stall, the task moves to `blocked_external` with backoff.
 - Once the first tool call arrives, the watchdog disarms — subsequent tool gaps are not monitored.
-- Works across all runtime adapters: CLI transports receive SIGTERM, SDK/API transports are interrupted via AbortController.
+- **SDK transport only.** CLI and API transports are opaque — the entire tool-calling cycle runs inside the subprocess or remote server, so no `onToolUse` callbacks are emitted. The watchdog is automatically disabled for these transports; they rely on `AGENT_STAGE_RUN_TIMEOUT_MS` for timeout protection.
 
 ### Stale Task Watchdog
 

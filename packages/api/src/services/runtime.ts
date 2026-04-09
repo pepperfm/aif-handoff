@@ -285,7 +285,10 @@ export async function runApiRuntimeOneShot(input: {
         : {}),
     },
     execution: {
-      startTimeoutMs: env.API_RUNTIME_START_TIMEOUT_MS,
+      // CLI/API transports produce output only after the full run completes,
+      // so start timeout is meaningless — disable it and rely on run timeout only.
+      startTimeoutMs:
+        context.resolvedProfile.transport === "sdk" ? env.API_RUNTIME_START_TIMEOUT_MS : 0,
       runTimeoutMs: env.API_RUNTIME_RUN_TIMEOUT_MS,
       includePartialMessages: input.includePartialMessages ?? false,
       maxTurns: input.maxTurns,

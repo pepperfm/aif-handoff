@@ -451,7 +451,10 @@ export async function executeSubagentQuery(
     const registry = await getRuntimeRegistry();
     adapter = registry.resolveRuntime(context.runtimeId);
 
-    const firstActivityTimeoutMs = getEnv().AGENT_FIRST_ACTIVITY_TIMEOUT_MS;
+    // First-activity watchdog only works for SDK transport which streams tool events.
+    // CLI/API transports are opaque — no onToolUse callbacks until the run completes.
+    const firstActivityTimeoutMs =
+      context.transport === "sdk" ? getEnv().AGENT_FIRST_ACTIVITY_TIMEOUT_MS : 0;
     let result: Awaited<ReturnType<RuntimeAdapter["run"]>> | undefined;
 
     // Retry loop: if agent stalls (no tool activity after start), kill and restart
@@ -479,6 +482,10 @@ export async function executeSubagentQuery(
       );
       // Override the abort controller with our per-attempt one
       executionIntent.abortController = attemptAbort;
+      // CLI/API transports produce output only after the full run — disable start timeout
+      if (context.transport !== "sdk") {
+        executionIntent.startTimeoutMs = 0;
+      }
 
       // Set up first-activity watchdog for this attempt
       watchdog = createFirstActivityWatchdog(firstActivityTimeoutMs, attemptAbort, () => {

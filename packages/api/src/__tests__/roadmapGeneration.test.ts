@@ -158,9 +158,9 @@ describe("roadmapGeneration", () => {
       expect(existsSync(result.roadmapPath)).toBe(true);
       expect(readFileSync(result.roadmapPath, "utf8")).toContain("# Project Roadmap");
 
-      // Prompt must include /aif-roadmap skill prefix
+      // Prompt must include roadmap generation instructions
       const callArgs = mockRunApiRuntimeOneShot.mock.calls[0][0];
-      expect(callArgs.prompt).toMatch(/^\/aif-roadmap generate\n/);
+      expect(callArgs.prompt).toContain("ROADMAP.md");
     });
 
     it("should accept vision without DESCRIPTION.md", async () => {
@@ -273,6 +273,28 @@ describe("roadmapGeneration", () => {
 
       const result = await generateRoadmapTasks({ projectId, roadmapAlias: "v1" });
       expect(result.tasks).toHaveLength(1);
+    });
+
+    it("should extract JSON from fence even when agent adds extra text after", async () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap\n- [ ] Y");
+
+      mockRunApiRuntimeOneShot.mockResolvedValue({
+        result: {
+          outputText:
+            '```json\n{"alias":"v1","tasks":[{"title":"Y","description":"do Y","phase":1,"phaseName":"P1","sequence":1}]}\n```\n\nThe ROADMAP.md file currently only contains a summary. Please provide detailed milestones.',
+          usage: {
+            inputTokens: 50,
+            outputTokens: 30,
+            totalTokens: 80,
+            costUsd: 0.0005,
+          },
+        },
+        context: {},
+      });
+
+      const result = await generateRoadmapTasks({ projectId, roadmapAlias: "v1" });
+      expect(result.tasks).toHaveLength(1);
+      expect(result.tasks[0].title).toBe("Y");
     });
 
     it("should throw PARSE_ERROR for invalid JSON", async () => {

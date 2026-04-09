@@ -58,6 +58,12 @@ export interface GenerateRoadmapFileResult {
  * Reads DESCRIPTION.md and ARCHITECTURE.md for context, then produces
  * a strategic milestone roadmap.
  */
+/** Extract roadmap content from agent outputText, stripping markdown fences if present. */
+function extractRoadmapContent(raw: string): string {
+  const fenceMatch = raw.match(/```(?:markdown)?\s*\n([\s\S]*?)\n\s*```/);
+  return fenceMatch ? fenceMatch[1].trim() : raw.trim();
+}
+
 export async function generateRoadmapFile(
   input: GenerateRoadmapFileInput,
 ): Promise<GenerateRoadmapFileResult> {
@@ -99,17 +105,15 @@ export async function generateRoadmapFile(
     architecture,
     vision: vision ?? null,
   });
-  const prompt = `/aif-roadmap generate\n\n${basePrompt}`;
-
   let rawResult = "";
   try {
     const { result } = await runApiRuntimeOneShot({
       projectId,
       projectRoot: project.rootPath,
-      prompt,
+      prompt: basePrompt,
       workflowKind: "roadmap-generate",
       systemPromptAppend:
-        "Do not use tools or subagents. Reply directly with the ROADMAP.md content in markdown format. No JSON, no code fences around the entire output.",
+        "Do not spawn subagents. Reply directly with the ROADMAP.md content in markdown format. No JSON, no code fences around the entire output.",
     });
     rawResult = (result.outputText ?? "").trim();
   } catch (err) {
@@ -120,18 +124,29 @@ export async function generateRoadmapFile(
     );
   }
 
-  if (!rawResult) {
-    throw new RoadmapGenerationError("EMPTY_RESPONSE", "Agent returned empty roadmap");
-  }
-
-  // Strip markdown fences if agent wrapped the whole output
-  const content = rawResult.replace(/^```(?:markdown)?\s*/m, "").replace(/\s*```\s*$/m, "");
-
-  // Write ROADMAP.md
+  // Write ROADMAP.md — agent may have already written the file via tools (CLI mode),
+  // so check the file first before falling back to outputText.
   const cfg = getProjectConfig(project.rootPath);
   const roadmapPath = join(project.rootPath, cfg.paths.roadmap);
   mkdirSync(dirname(roadmapPath), { recursive: true });
-  writeFileSync(roadmapPath, content, "utf8");
+
+  let content: string;
+  if (existsSync(roadmapPath)) {
+    const fileContent = readFileSync(roadmapPath, "utf8").trim();
+    // Verify agent wrote a real roadmap, not just a stub
+    if (fileContent.length > 100 && (fileContent.includes("- [") || fileContent.includes("##"))) {
+      content = fileContent;
+      log.info({ projectId, roadmapPath, source: "file" }, "Using roadmap file written by agent");
+    } else {
+      content = extractRoadmapContent(rawResult);
+      writeFileSync(roadmapPath, content, "utf8");
+    }
+  } else if (rawResult) {
+    content = extractRoadmapContent(rawResult);
+    writeFileSync(roadmapPath, content, "utf8");
+  } else {
+    throw new RoadmapGenerationError("EMPTY_RESPONSE", "Agent returned empty roadmap");
+  }
 
   log.info({ projectId, roadmapPath, contentLength: content.length }, "Roadmap file generated");
 
@@ -228,7 +243,7 @@ export async function generateRoadmapTasks(
       workflowKind: "roadmap-extract",
       modelOverride: lightModel,
       systemPromptAppend:
-        "Do not use tools or subagents. Reply directly with JSON only. No markdown fences.",
+        "Do not spawn subagents. Reply directly with JSON only. No markdown fences, no explanatory text.",
     });
 
     if (trackingTaskId && result.usage) {
@@ -303,8 +318,9 @@ Rules:
 }
 
 function parseAgentResponse(raw: string, expectedAlias: string): RoadmapGenerationResult {
-  // Strip markdown fences if agent included them despite instructions
-  const cleaned = raw.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "");
+  // Extract JSON from markdown fences — agent may include extra text after the closing fence
+  const fenceMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
+  const cleaned = fenceMatch ? fenceMatch[1].trim() : raw.trim();
 
   let jsonObj: unknown;
   try {

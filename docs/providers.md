@@ -68,6 +68,17 @@ Capabilities are **transport-aware**: the same adapter may expose different capa
 | `cli`     | Spawn a subprocess, parse stdout      | `claude --agent ...`, `codex run --json` |
 | `api`     | HTTP POST to a remote endpoint        | OpenAI-compatible REST API               |
 
+#### Transport Observability Differences
+
+**SDK transport** streams events in real time — tool calls, subagent spawns, and partial messages are visible as they happen. The Agent Activity timeline shows each tool invocation with timestamps. The first-activity watchdog can detect hung agents within 60 seconds.
+
+**CLI and API transports** are opaque — the entire tool-calling cycle runs inside the subprocess or remote server. The coordinator only sees "agent started" and "agent complete/failed" with no intermediate events. Consequently:
+
+- **Agent Activity** shows only start/complete entries, not individual tool calls
+- **First-activity watchdog** is disabled (no `onToolUse` callbacks to monitor)
+- **Start timeout** (`AGENT_QUERY_START_TIMEOUT_MS`) is disabled — CLI/API produce output only after the full run completes, so the only protection is the run timeout (`AGENT_STAGE_RUN_TIMEOUT_MS`)
+- **Token usage** is reported as a single aggregate at the end of the run
+
 ## Built-In Adapter Examples
 
 ### Claude (SDK)
