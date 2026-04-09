@@ -148,7 +148,7 @@ export function withStreamTimeouts<T>(
 
     // Apply start timeout only on the first call
     if (!firstYielded && startMs !== null) {
-      const result = await Promise.race<IteratorResult<T> | "START_TIMEOUT">([
+      const racers: Promise<IteratorResult<T> | "START_TIMEOUT" | "ABORTED">[] = [
         iterator.next(),
         new Promise<"START_TIMEOUT">((resolve) => {
           startTimer = setTimeout(() => {
@@ -159,12 +159,27 @@ export function withStreamTimeouts<T>(
             resolve("START_TIMEOUT");
           }, startMs);
         }),
-      ]);
+      ];
+      // Also race with external abort so watchdog can interrupt the first call
+      if (abort && !abort.signal.aborted) {
+        racers.push(
+          new Promise<"ABORTED">((resolve) => {
+            abort.signal.addEventListener("abort", () => resolve("ABORTED"), { once: true });
+          }),
+        );
+      }
+      const result = await Promise.race(racers);
 
       if (result === "START_TIMEOUT") {
         cleanup();
         await cleanupIterator();
         throw makeStartTimeoutError(startMs);
+      }
+
+      if (result === "ABORTED") {
+        cleanup();
+        await cleanupIterator();
+        throw makeRunTimeoutError(runMs ?? 0);
       }
 
       // Clear start timer — first value received
@@ -180,9 +195,30 @@ export function withStreamTimeouts<T>(
       return result;
     }
 
-    // Subsequent calls — no start timeout, but run timeout still active via abort
+    // Subsequent calls — race with abort signal so external abort (watchdog,
+    // stage timeout) immediately interrupts a hanging iterator.next().
     try {
-      const result = await iterator.next();
+      let result: IteratorResult<T>;
+      if (abort && !abort.signal.aborted) {
+        const abortRace = new Promise<"ABORTED">((resolve) => {
+          const onAbort = () => resolve("ABORTED");
+          abort.signal.addEventListener("abort", onAbort, { once: true });
+        });
+        const raced = await Promise.race([iterator.next(), abortRace]);
+        if (raced === "ABORTED") {
+          cleanup();
+          await cleanupIterator();
+          throw makeRunTimeoutError(runMs ?? 0);
+        }
+        result = raced;
+      } else if (abort?.signal.aborted) {
+        cleanup();
+        await cleanupIterator();
+        throw makeRunTimeoutError(runMs ?? 0);
+      } else {
+        result = await iterator.next();
+      }
+
       if (!firstYielded) firstYielded = true;
       if (result.done) {
         cleanup();

@@ -368,6 +368,17 @@ function runCodexCliAttempt(
     stderr += String(chunk);
   });
 
+  // If abort is requested, kill the child
+  if (execution?.abortController) {
+    execution.abortController.signal.addEventListener(
+      "abort",
+      () => {
+        child.kill("SIGTERM");
+      },
+      { once: true },
+    );
+  }
+
   child.stdin!.on("error", () => {
     // Ignore broken-pipe errors — the child may exit before stdin is fully written
   });

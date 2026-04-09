@@ -15,6 +15,7 @@ const EXTERNAL_FAILURE_PATTERNS: string[] = [
   "credits",
   "exited with code 1",
   "timed out",
+  "first_activity_timeout",
   "stream interrupted",
   "stream closed",
   "error in hook callback",

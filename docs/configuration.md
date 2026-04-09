@@ -38,6 +38,7 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `AGENT_STAGE_RUN_TIMEOUT_MS`       | number  | `3600000`                      | Per-stage hard timeout (planner/plan-checker/implementer/reviewer) before the coordinator treats it as failed                                                                                                                                                           |
 | `AGENT_QUERY_START_TIMEOUT_MS`     | number  | `60000`                        | Timeout waiting for the first message from Claude query stream before treating startup as hung                                                                                                                                                                          |
 | `AGENT_QUERY_START_RETRY_DELAY_MS` | number  | `1000`                         | Delay before one automatic retry after `query_start_timeout`                                                                                                                                                                                                            |
+| `AGENT_FIRST_ACTIVITY_TIMEOUT_MS`  | number  | `60000`                        | First-activity watchdog: if no tool call or subagent spawn arrives within this window after agent start, the agent is killed and restarted (up to 2 retries). Detects hung agents early instead of waiting for the 90-min stale timeout. Set to `0` to disable          |
 | `API_RUNTIME_START_TIMEOUT_MS`     | number  | `60000`                        | Timeout waiting for first output from API-triggered one-shot runtime calls (`0` disables)                                                                                                                                                                               |
 | `API_RUNTIME_RUN_TIMEOUT_MS`       | number  | `120000`                       | Hard timeout for API-triggered one-shot runtime calls such as roadmap/fast-fix/commit generation (`0` disables)                                                                                                                                                         |
 | `DATABASE_URL`                     | string  | `./data/aif.sqlite`            | Path to the SQLite database file                                                                                                                                                                                                                                        |
@@ -174,6 +175,15 @@ Subagent query startup has a dedicated guard:
 - If no first stream message arrives within `AGENT_QUERY_START_TIMEOUT_MS`, the run is marked as `query_start_timeout`.
 - The coordinator performs one automatic retry after `AGENT_QUERY_START_RETRY_DELAY_MS`.
 - If the second attempt also times out, normal error handling applies (stage failure path).
+
+### First-Activity Watchdog
+
+After an agent starts (e.g. `implement-coordinator started`), the coordinator monitors for the first tool call or subagent spawn:
+
+- If no tool activity arrives within `AGENT_FIRST_ACTIVITY_TIMEOUT_MS` (default 60s), the agent process is killed immediately and restarted.
+- Up to 2 automatic retries (3 attempts total). If all attempts stall, the task moves to `blocked_external` with backoff.
+- Once the first tool call arrives, the watchdog disarms — subsequent tool gaps are not monitored.
+- Works across all runtime adapters: CLI transports receive SIGTERM, SDK/API transports are interrupted via AbortController.
 
 ### Stale Task Watchdog
 
