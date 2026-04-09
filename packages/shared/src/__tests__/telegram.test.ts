@@ -38,7 +38,7 @@ describe("sendTelegramNotification", () => {
   });
 
   it("uses TELEGRAM_BOT_API_URL when configured", async () => {
-    vi.stubEnv("TELEGRAM_BOT_API_URL", "https://telega.ie0.ru/");
+    vi.stubEnv("TELEGRAM_BOT_API_URL", "https://telegram-bot-api.example.test/");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:ABC");
     vi.stubEnv("TELEGRAM_USER_ID", "999");
 
@@ -52,7 +52,7 @@ describe("sendTelegramNotification", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.telegram.org/bot123:ABC/sendMessage",
+      "https://telegram-bot-api.example.test/bot123:ABC/sendMessage",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
