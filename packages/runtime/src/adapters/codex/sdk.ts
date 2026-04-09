@@ -30,10 +30,24 @@ export interface CodexSdkLogger {
   error?(context: Record<string, unknown>, message: string): void;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function formatToolDetail(value: unknown, maxLength = 200): string {
+  if (value == null) return "";
 
+  let text: string;
+  if (typeof value === "string") {
+    text = value;
+  } else if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    text = String(value);
+  } else {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
 const ALLOWED_ENV_PREFIXES = [
   "OPENAI_",
   "CODEX_",
@@ -266,16 +280,19 @@ function normalizeUsage(usage: Usage | null): RuntimeUsage | null {
 function itemToToolUseSummary(item: ThreadItem): { toolName: string; detail: string } | null {
   switch (item.type) {
     case "command_execution":
-      return { toolName: "Bash", detail: item.command.slice(0, 200) };
+      return { toolName: "Bash", detail: formatToolDetail(item.command) };
     case "file_change":
       return {
         toolName: "FileChange",
-        detail: item.changes.map((c) => `${c.kind} ${c.path}`).join(", "),
+        detail: formatToolDetail(item.changes.map((c) => `${c.kind} ${c.path}`).join(", ")),
       };
     case "mcp_tool_call":
-      return { toolName: `MCP:${item.server}/${item.tool}`, detail: String(item.arguments ?? "") };
+      return {
+        toolName: `MCP:${item.server}/${item.tool}`,
+        detail: formatToolDetail(item.arguments),
+      };
     case "web_search":
-      return { toolName: "WebSearch", detail: item.query };
+      return { toolName: "WebSearch", detail: formatToolDetail(item.query) };
     default:
       return null;
   }

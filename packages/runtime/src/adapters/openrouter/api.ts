@@ -139,6 +139,20 @@ function buildMessages(input: RuntimeRunInput): ChatMessage[] {
   return messages;
 }
 
+const OPENROUTER_EFFORT_LEVELS = new Set(["minimal", "low", "medium", "high", "xhigh"] as const);
+
+type OpenRouterEffortLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+
+function normalizeOpenRouterEffort(value: unknown): OpenRouterEffortLevel | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (OPENROUTER_EFFORT_LEVELS.has(trimmed as OpenRouterEffortLevel)) {
+      return trimmed as OpenRouterEffortLevel;
+    }
+  }
+  return null;
+}
+
 function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: input.model,
@@ -155,6 +169,12 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
         schema: input.execution.outputSchema,
       },
     };
+  }
+
+  const options = asRecord(input.options);
+  const effort = normalizeOpenRouterEffort(options.effort);
+  if (effort) {
+    body.reasoning = { effort };
   }
 
   return body;

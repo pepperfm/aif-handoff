@@ -65,8 +65,10 @@ export interface AifConfig {
 
 const API_PREFIX = import.meta.env.DEV ? "" : "/api";
 const API_BASE = "/tasks";
-const REQUEST_TIMEOUT_MS = 15000;
-const FAST_FIX_TIMEOUT_MS = 120000;
+const REQUEST_TIMEOUT_MS = 15_000;
+export const PLAN_FAST_FIX_TIMEOUT_MS = 200_000;
+const CHAT_TIMEOUT_MS = 300_000;
+const IMPORT_ROADMAP_TIMEOUT_MS = 300_000;
 
 export interface SettingsResponse {
   useSubagents: boolean;
@@ -225,7 +227,7 @@ export const api = {
     options?: Pick<TaskEventInput, "deletePlanFile" | "commitOnApprove">,
   ): Promise<Task> {
     console.debug("[api] POST /tasks/%s/events →", id, event);
-    const timeoutMs = event === "fast_fix" ? FAST_FIX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const timeoutMs = event === "fast_fix" ? PLAN_FAST_FIX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     return request<Task>(
       `${API_BASE}/${id}/events`,
       {
@@ -295,7 +297,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ roadmapAlias }),
       },
-      120000,
+      IMPORT_ROADMAP_TIMEOUT_MS,
     );
   },
 
@@ -372,7 +374,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify(input),
       },
-      120000,
+      CHAT_TIMEOUT_MS,
     );
   },
 

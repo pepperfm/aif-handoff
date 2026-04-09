@@ -28,6 +28,20 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+const CODEX_CLI_EFFORT_LEVELS = new Set(["minimal", "low", "medium", "high", "xhigh"] as const);
+
+type CodexCliEffortLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+
+function normalizeCodexCliEffort(value: unknown): CodexCliEffortLevel | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (CODEX_CLI_EFFORT_LEVELS.has(trimmed as CodexCliEffortLevel)) {
+      return trimmed as CodexCliEffortLevel;
+    }
+  }
+  return null;
+}
+
 function readStringArray(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const parsed = value.filter((entry): entry is string => typeof entry === "string");
@@ -58,8 +72,9 @@ function normalizeCliArgs(input: RuntimeRunInput): string[] {
   if (input.model) {
     args.push("--model", input.model);
   }
-  if (input.prompt) {
-    args.push(input.prompt);
+  const effort = normalizeCodexCliEffort(options.modelReasoningEffort);
+  if (effort) {
+    args.push("-c", `model_reasoning_effort="${effort}"`);
   }
   return args;
 }

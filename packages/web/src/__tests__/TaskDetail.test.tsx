@@ -131,6 +131,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     getTaskPlanFileStatus: (...args: unknown[]) => mockGetTaskPlanFileStatus(...args),
   },
+  PLAN_FAST_FIX_TIMEOUT_MS: 200_000,
 }));
 
 vi.mock("@/hooks/useTasks", () => ({

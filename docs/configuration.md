@@ -38,6 +38,8 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `AGENT_STAGE_RUN_TIMEOUT_MS`       | number  | `3600000`                      | Per-stage hard timeout (planner/plan-checker/implementer/reviewer) before the coordinator treats it as failed                                                                                                                                                           |
 | `AGENT_QUERY_START_TIMEOUT_MS`     | number  | `60000`                        | Timeout waiting for the first message from Claude query stream before treating startup as hung                                                                                                                                                                          |
 | `AGENT_QUERY_START_RETRY_DELAY_MS` | number  | `1000`                         | Delay before one automatic retry after `query_start_timeout`                                                                                                                                                                                                            |
+| `API_RUNTIME_START_TIMEOUT_MS`     | number  | `60000`                        | Timeout waiting for first output from API-triggered one-shot runtime calls (`0` disables)                                                                                                                                                                               |
+| `API_RUNTIME_RUN_TIMEOUT_MS`       | number  | `120000`                       | Hard timeout for API-triggered one-shot runtime calls such as roadmap/fast-fix/commit generation (`0` disables)                                                                                                                                                         |
 | `DATABASE_URL`                     | string  | `./data/aif.sqlite`            | Path to the SQLite database file                                                                                                                                                                                                                                        |
 | `AGENT_QUERY_AUDIT_ENABLED`        | boolean | `true`                         | Enable/disable writing agent query audit logs to `logs/*.log`                                                                                                                                                                                                           |
 | `LOG_LEVEL`                        | string  | `debug`                        | Pino log level: `fatal`, `error`, `warn`, `info`, `debug`, `trace`                                                                                                                                                                                                      |
@@ -49,11 +51,27 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 | `COORDINATOR_MAX_CONCURRENT_TASKS` | number  | `3`                            | Max concurrent tasks per stage for parallel-enabled projects. Non-parallel projects always process 1 task at a time regardless of this value. Range 1–10                                                                                                                |
 | `AGENT_BYPASS_PERMISSIONS`         | boolean | `true`                         | Bypass all Claude permission checks for subagents. When `false`, configure permissions via `.claude/settings.json` allow rules                                                                                                                                          |
 | `AGENT_USE_SUBAGENTS`              | boolean | `true`                         | Default for the per-task "Use subagents" setting. Each task can override this in Planner settings. `true`: custom agents (`plan-coordinator`, `implement-coordinator`, sidecars). `false`: `aif-plan`, `aif-implement`, `aif-review`, `aif-security-checklist` directly |
+| `AGENT_CHAT_MAX_TURNS`             | number  | `50`                           | Maximum turns (tool calls) per chat session before the runtime terminates. Increase for complex multi-file tasks                                                                                                                                                        |
 | `TELEGRAM_BOT_API_URL`             | string  | `https://api.telegram.org`     | Optional Telegram Bot API base URL or proxy endpoint                                                                                                                                                                                                                    |
 | `TELEGRAM_BOT_TOKEN`               | string  | _(optional)_                   | Telegram bot token for task status notifications (see [Telegram Notifications](#telegram-notifications))                                                                                                                                                                |
 | `TELEGRAM_USER_ID`                 | string  | _(optional)_                   | Telegram user ID to receive notifications                                                                                                                                                                                                                               |
 
 Environment validation is handled by Zod in `packages/shared/src/env.ts`. The application will fail to start with a descriptive error if required variables are invalid.
+
+## Frontend Request Timeouts
+
+The web UI (`@aif/web`) uses named timeout constants for HTTP requests to the API server. All constants are defined in `packages/web/src/lib/api.ts`:
+
+| Constant                    | Value | Used By                 | Description                                           |
+| --------------------------- | ----- | ----------------------- | ----------------------------------------------------- |
+| `REQUEST_TIMEOUT_MS`        | 15s   | All CRUD endpoints      | Short timeout for standard read/write API calls       |
+| `PLAN_FAST_FIX_TIMEOUT_MS`  | 200s  | `taskEvent("fast_fix")` | AI-driven plan fast fix (runtime resolves model/plan) |
+| `CHAT_TIMEOUT_MS`           | 300s  | `sendChatMessage()`     | Chat with AI (long-running, multi-turn)               |
+| `IMPORT_ROADMAP_TIMEOUT_MS` | 300s  | `importRoadmap()`       | Roadmap import (parses and creates tasks)             |
+
+`COMMENT_TIMEOUT_MS` (30s) is defined locally in `useTaskDetailActions.ts` for comment creation and non-AI task events.
+
+If a request exceeds its timeout, the browser aborts the fetch and the user sees a "Request timed out" error. The backend process may continue running independently.
 
 ## Authentication
 
@@ -71,6 +89,7 @@ Optional runtime defaults:
 
 - `CODEX_CLI_PATH` for CLI transport adapters
 - `AIF_RUNTIME_MODULES` for loading additional runtime modules at startup (`registerRuntimeModule(registry)`)
+- `API_RUNTIME_START_TIMEOUT_MS` / `API_RUNTIME_RUN_TIMEOUT_MS` for API one-shot runtime calls
 
 ### Runtime Readiness Check
 

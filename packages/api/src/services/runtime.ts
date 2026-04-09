@@ -242,6 +242,7 @@ export async function runApiRuntimeOneShot(input: {
   result: RuntimeRunResult;
   context: RuntimeExecutionContext;
 }> {
+  const env = getEnv();
   const workflow = createRuntimeWorkflowSpec({
     workflowKind: input.workflowKind ?? "oneshot",
     prompt: input.prompt,
@@ -264,7 +265,7 @@ export async function runApiRuntimeOneShot(input: {
     workflow,
   });
 
-  const bypassPermissions = getEnv().AGENT_BYPASS_PERMISSIONS;
+  const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
   const result = await context.adapter.run({
     runtimeId: context.resolvedProfile.runtimeId,
     providerId: context.resolvedProfile.providerId,
@@ -282,6 +283,8 @@ export async function runApiRuntimeOneShot(input: {
         : {}),
     },
     execution: {
+      startTimeoutMs: env.API_RUNTIME_START_TIMEOUT_MS,
+      runTimeoutMs: env.API_RUNTIME_RUN_TIMEOUT_MS,
       includePartialMessages: input.includePartialMessages ?? false,
       maxTurns: input.maxTurns,
       systemPromptAppend: input.systemPromptAppend,

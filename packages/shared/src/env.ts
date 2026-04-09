@@ -44,6 +44,8 @@ const envSchema = z.object({
   AGENT_STAGE_RUN_TIMEOUT_MS: z.coerce.number().default(60 * 60 * 1000),
   AGENT_QUERY_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
   AGENT_QUERY_START_RETRY_DELAY_MS: z.coerce.number().default(1000),
+  API_RUNTIME_START_TIMEOUT_MS: z.coerce.number().default(60 * 1000),
+  API_RUNTIME_RUN_TIMEOUT_MS: z.coerce.number().default(120 * 1000),
   DATABASE_URL: z.string().default("./data/aif.sqlite"),
   CORS_ORIGIN: z.string().default("*"),
   API_BASE_URL: z.string().default("http://localhost:3009"),
@@ -96,6 +98,7 @@ const envSchema = z.object({
     }, z.boolean())
     .default(true),
   COORDINATOR_MAX_CONCURRENT_TASKS: z.coerce.number().min(1).max(10).default(3),
+  AGENT_CHAT_MAX_TURNS: z.coerce.number().min(1).default(50),
   AGENT_MAX_REVIEW_ITERATIONS: z.coerce.number().min(1).default(3),
   AGENT_USE_SUBAGENTS: z
     .preprocess((value) => {

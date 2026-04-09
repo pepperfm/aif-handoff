@@ -109,6 +109,7 @@ vi.mock("@aif/shared", async (importOriginal) => {
       AGENT_WAKE_ENABLED: true,
       AGENT_BYPASS_PERMISSIONS: true,
       COORDINATOR_MAX_CONCURRENT_TASKS: 3,
+      AGENT_CHAT_MAX_TURNS: 50,
       AGENT_MAX_REVIEW_ITERATIONS: 3,
       AGENT_USE_SUBAGENTS: true,
       TELEGRAM_BOT_TOKEN: undefined,

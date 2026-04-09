@@ -68,6 +68,27 @@ function toIso(value: unknown): string {
   return new Date().toISOString();
 }
 
+const OPENCODE_EFFORT_LEVELS = new Set([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const);
+
+type OpenCodeEffortLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+function normalizeOpenCodeEffort(value: unknown): OpenCodeEffortLevel | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (OPENCODE_EFFORT_LEVELS.has(trimmed as OpenCodeEffortLevel)) {
+      return trimmed as OpenCodeEffortLevel;
+    }
+  }
+  return null;
+}
+
 function stripSensitiveOptions(
   options: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
@@ -383,6 +404,12 @@ export async function runOpenCodeApi(
       name: "response",
       schema: input.execution.outputSchema,
     };
+  }
+
+  const options = asRecord(input.options);
+  const effort = normalizeOpenCodeEffort(options.reasoningEffort);
+  if (effort) {
+    body.reasoningEffort = effort;
   }
 
   const messagePayload = await requestJson<{ info?: unknown; parts?: unknown[] }>(input, {

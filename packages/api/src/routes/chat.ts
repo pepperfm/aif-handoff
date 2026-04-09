@@ -236,6 +236,42 @@ function eventId(event: RuntimeEvent): string {
   return raw ?? crypto.randomUUID();
 }
 
+function mergeRuntimeAndDbMessages(
+  runtimeMessages: ChatSessionMessage[],
+  dbMessages: ChatSessionMessage[],
+): ChatSessionMessage[] {
+  if (runtimeMessages.length === 0) {
+    return dbMessages;
+  }
+
+  const matchedRuntimeMessages = new Array(runtimeMessages.length).fill(false);
+  const merged = runtimeMessages.map((message) => ({ ...message }));
+
+  for (const dbMessage of dbMessages) {
+    const matchIndex = runtimeMessages.findIndex(
+      (runtimeMessage, index) =>
+        !matchedRuntimeMessages[index] &&
+        runtimeMessage.role === dbMessage.role &&
+        runtimeMessage.content === dbMessage.content,
+    );
+
+    if (matchIndex === -1) {
+      merged.push(dbMessage);
+      continue;
+    }
+
+    matchedRuntimeMessages[matchIndex] = true;
+    merged[matchIndex] = {
+      ...merged[matchIndex],
+      id: dbMessage.id,
+      createdAt: dbMessage.createdAt,
+      ...(dbMessage.attachments?.length ? { attachments: dbMessage.attachments } : {}),
+    };
+  }
+
+  return merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 function buildChatRuntimeWorkflow(prompt: string, systemPromptAppend: string) {
   return createRuntimeWorkflowSpec({
     workflowKind: "chat",
@@ -492,6 +528,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
     return c.json({ error: "Chat session not found" }, 404);
   }
 
+  const dbMessages = listChatMessages(id).map(toChatMessageResponse);
   const project = findProjectById(session.projectId);
   const linkedRuntimeSessionId = session.runtimeSessionId ?? session.agentSessionId;
 
@@ -532,17 +569,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
           headers: profileHeaders,
         });
 
-        // Merge DB attachment metadata into runtime messages (attachments are persisted locally)
-        const dbMessages = listChatMessages(id);
-        const dbAttachmentsByContent = new Map<string, ChatSessionMessage["attachments"]>();
-        for (const dbMsg of dbMessages) {
-          const response = toChatMessageResponse(dbMsg);
-          if (response.attachments?.length) {
-            dbAttachmentsByContent.set(response.content, response.attachments);
-          }
-        }
-
-        const messages: ChatSessionMessage[] = runtimeEvents
+        const runtimeMessages: ChatSessionMessage[] = runtimeEvents
           .map((event) => {
             const role = eventRole(event);
             const rawContent = event.message ?? "";
@@ -553,15 +580,25 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
               sessionId: id,
               role,
               content,
-              ...(dbAttachmentsByContent.has(content)
-                ? { attachments: dbAttachmentsByContent.get(content) }
-                : {}),
               createdAt: event.timestamp,
             } as ChatSessionMessage;
           })
           .filter((message): message is ChatSessionMessage => Boolean(message));
 
-        return c.json(messages);
+        if (runtimeMessages.length === 0 && dbMessages.length > 0) {
+          log.debug(
+            {
+              sessionId: id,
+              runtimeId,
+              runtimeSessionId: linkedRuntimeSessionId,
+              dbMessageCount: dbMessages.length,
+            },
+            "DEBUG [chat-route] Runtime session events were empty; falling back to DB messages",
+          );
+          return c.json(dbMessages);
+        }
+
+        return c.json(mergeRuntimeAndDbMessages(runtimeMessages, dbMessages));
       }
     } catch (err) {
       log.warn(
@@ -571,8 +608,7 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
     }
   }
 
-  const rows = listChatMessages(id);
-  return c.json(rows.map(toChatMessageResponse));
+  return c.json(dbMessages);
 });
 
 // PUT /chat/sessions/:id
@@ -812,7 +848,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       },
       execution: {
         includePartialMessages: true,
-        maxTurns: 20,
+        maxTurns: getEnv().AGENT_CHAT_MAX_TURNS,
         onEvent: onRuntimeEvent,
         systemPromptAppend: systemAppend,
         environment: {

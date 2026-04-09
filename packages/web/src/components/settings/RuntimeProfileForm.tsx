@@ -28,7 +28,7 @@ interface RuntimeModelOption {
   metadata?: Record<string, unknown>;
 }
 
-const MANAGED_OPTION_KEYS = ["effort", "modelReasoningEffort"] as const;
+const MANAGED_OPTION_KEYS = ["effort", "modelReasoningEffort", "reasoningEffort"] as const;
 const MODEL_DISCOVERY_DEBOUNCE_MS = 300;
 
 function parseJsonObject(raw: string): Record<string, unknown> {
@@ -67,15 +67,21 @@ function readInitialEffort(options: Record<string, unknown> | undefined): string
   return "";
 }
 
-function getEffortOptionKey(runtimeId: string): "effort" | "modelReasoningEffort" | null {
+function getEffortOptionKey(
+  runtimeId: string,
+): "effort" | "modelReasoningEffort" | "reasoningEffort" | null {
   if (runtimeId === "claude") return "effort";
   if (runtimeId === "codex") return "modelReasoningEffort";
+  if (runtimeId === "openrouter") return "effort";
+  if (runtimeId === "opencode") return "reasoningEffort";
   return null;
 }
 
 function getRuntimeEffortLevels(runtimeId: string): string[] {
   if (runtimeId === "claude") return ["low", "medium", "high", "max"];
   if (runtimeId === "codex") return ["minimal", "low", "medium", "high", "xhigh"];
+  if (runtimeId === "openrouter") return ["minimal", "low", "medium", "high", "xhigh"];
+  if (runtimeId === "opencode") return ["none", "minimal", "low", "medium", "high", "xhigh"];
   return [];
 }
 

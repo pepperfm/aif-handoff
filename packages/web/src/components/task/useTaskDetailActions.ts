@@ -5,7 +5,7 @@ import {
   type TaskEvent,
   type Task,
 } from "@aif/shared/browser";
-import { api } from "@/lib/api";
+import { api, PLAN_FAST_FIX_TIMEOUT_MS } from "@/lib/api";
 import { encodeBase64 } from "@/lib/formatters";
 import {
   useUpdateTask,
@@ -22,7 +22,6 @@ const IMAGE_FILE_MAX_SIZE = 1_000_000;
 const BASE64_CONTENT_MAX_SIZE = 2_000_000;
 const MAX_TASK_ATTACHMENTS = 10;
 const COMMENT_TIMEOUT_MS = 30_000;
-const FAST_FIX_TIMEOUT_MS = 200_000;
 
 export async function toAttachmentPayload(file: File): Promise<TaskCommentAttachment> {
   const isTextLike =
@@ -122,7 +121,7 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
                 ? "fast_fix"
                 : "request_changes",
         }),
-        planChangeMode === "fast_fix" ? FAST_FIX_TIMEOUT_MS : COMMENT_TIMEOUT_MS,
+        planChangeMode === "fast_fix" ? PLAN_FAST_FIX_TIMEOUT_MS : COMMENT_TIMEOUT_MS,
         "Task event request timed out",
       );
       if (planChangeMode === "fast_fix") {

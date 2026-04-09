@@ -10,15 +10,19 @@ const mockFindChatSessionById = vi.fn();
 const mockUpdateChatSession = vi.fn();
 const mockCreateChatMessage = vi.fn();
 const mockUpdateChatSessionTimestamp = vi.fn();
+const mockListChatMessages = vi.fn();
+const mockToChatMessageResponse = vi.fn();
 const mockSendToClient = vi.fn();
 const mockBroadcast = vi.fn();
 const mockInvalidateCache = vi.fn();
 const mockResolveApiRuntimeContext = vi.fn();
 const mockAssertApiRuntimeCapabilities = vi.fn();
+const mockGetApiRuntimeRegistry = vi.fn();
 const mockPersistAttachments = vi.fn();
 
 const mockAdapterRun = vi.fn();
 const mockAdapterResume = vi.fn();
+const mockListSessionEvents = vi.fn();
 
 const runtimeAdapter: RuntimeAdapter = {
   descriptor: {
@@ -38,6 +42,7 @@ const runtimeAdapter: RuntimeAdapter = {
   },
   run: (input) => mockAdapterRun(input),
   resume: (input) => mockAdapterResume(input),
+  listSessionEvents: (input) => mockListSessionEvents(input),
 };
 
 vi.mock("@aif/data", () => ({
@@ -50,9 +55,9 @@ vi.mock("@aif/data", () => ({
   createChatMessage: (input: unknown) => mockCreateChatMessage(input),
   updateChatSessionTimestamp: (id: string) => mockUpdateChatSessionTimestamp(id),
   listChatSessions: vi.fn(() => []),
-  listChatMessages: vi.fn(() => []),
+  listChatMessages: (...args: unknown[]) => mockListChatMessages(...args),
   toChatSessionResponse: vi.fn((row: unknown) => row),
-  toChatMessageResponse: vi.fn((row: unknown) => row),
+  toChatMessageResponse: (row: unknown) => mockToChatMessageResponse(row),
   deleteChatSession: vi.fn(),
   findRuntimeProfileById: vi.fn(() => null),
 }));
@@ -60,7 +65,7 @@ vi.mock("@aif/data", () => ({
 vi.mock("../services/runtime.js", () => ({
   resolveApiRuntimeContext: (input: unknown) => mockResolveApiRuntimeContext(input),
   assertApiRuntimeCapabilities: (input: unknown) => mockAssertApiRuntimeCapabilities(input),
-  getApiRuntimeRegistry: vi.fn(),
+  getApiRuntimeRegistry: () => mockGetApiRuntimeRegistry(),
 }));
 
 vi.mock("../services/attachmentPersistence.js", () => ({
@@ -86,6 +91,8 @@ vi.mock("@aif/shared", async (importOriginal) => {
     ...actual,
     getEnv: () => ({
       AGENT_BYPASS_PERMISSIONS: false,
+      AIF_DEFAULT_RUNTIME_ID: "claude",
+      AIF_DEFAULT_PROVIDER_ID: "anthropic",
     }),
   };
 });
@@ -155,7 +162,14 @@ describe("chat API", () => {
       outputText: "resumed output",
       sessionId: "runtime-session-1",
     });
+    mockListSessionEvents.mockResolvedValue([]);
     mockPersistAttachments.mockResolvedValue([]);
+    mockListChatMessages.mockReturnValue([]);
+    mockToChatMessageResponse.mockImplementation((row) => row);
+    mockListSessionEvents.mockResolvedValue([]);
+    mockGetApiRuntimeRegistry.mockResolvedValue({
+      resolveRuntime: vi.fn(() => runtimeAdapter),
+    });
   });
 
   it("returns 404 when project is not found", async () => {
@@ -336,6 +350,120 @@ describe("chat API", () => {
     expect(resolveCall.workflow.promptInput.systemPromptAppend).toContain("implementing");
   });
 
+  it("returns persisted DB messages when linked runtime history is empty", async () => {
+    mockFindChatSessionById.mockReturnValue({
+      id: "session-1",
+      projectId: "project-1",
+      title: "Test",
+      runtimeProfileId: null,
+      runtimeSessionId: "runtime-session-1",
+      agentSessionId: null,
+    });
+    mockListChatMessages.mockReturnValue([
+      {
+        id: "msg-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "Saved question",
+        createdAt: "2026-04-08T17:00:00.000Z",
+      },
+      {
+        id: "msg-2",
+        sessionId: "session-1",
+        role: "assistant",
+        content: "Saved answer",
+        createdAt: "2026-04-08T17:00:01.000Z",
+      },
+    ]);
+
+    const res = await app.request("/chat/sessions/session-1/messages");
+
+    expect(res.status).toBe(200);
+    expect(mockListSessionEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeId: "claude",
+        sessionId: "runtime-session-1",
+      }),
+    );
+    expect(await res.json()).toEqual([
+      {
+        id: "msg-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "Saved question",
+        createdAt: "2026-04-08T17:00:00.000Z",
+      },
+      {
+        id: "msg-2",
+        sessionId: "session-1",
+        role: "assistant",
+        content: "Saved answer",
+        createdAt: "2026-04-08T17:00:01.000Z",
+      },
+    ]);
+  });
+
+  it("preserves duplicate DB messages that are absent from runtime history", async () => {
+    mockFindChatSessionById.mockReturnValue({
+      id: "session-1",
+      projectId: "project-1",
+      title: "Test",
+      runtimeProfileId: null,
+      runtimeSessionId: "runtime-session-1",
+      agentSessionId: null,
+    });
+    mockListSessionEvents.mockResolvedValue([
+      {
+        type: "session-message",
+        timestamp: "2026-04-08T17:00:05.000Z",
+        message: "Saved question",
+        data: {
+          role: "user",
+          id: "runtime-msg-1",
+        },
+      },
+    ]);
+    mockListChatMessages.mockReturnValue([
+      {
+        id: "msg-1",
+        sessionId: "session-1",
+        role: "user",
+        content: "Saved question",
+        createdAt: "2026-04-08T17:00:00.000Z",
+      },
+      {
+        id: "msg-2",
+        sessionId: "session-1",
+        role: "assistant",
+        content: "Repeated answer",
+        createdAt: "2026-04-08T17:00:01.000Z",
+      },
+      {
+        id: "msg-3",
+        sessionId: "session-1",
+        role: "assistant",
+        content: "Repeated answer",
+        createdAt: "2026-04-08T17:00:02.000Z",
+      },
+    ]);
+
+    const res = await app.request("/chat/sessions/session-1/messages");
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(3);
+    expect(body.map((message: { content: string; createdAt: string }) => message.content)).toEqual([
+      "Saved question",
+      "Repeated answer",
+      "Repeated answer",
+    ]);
+    expect(
+      body.filter(
+        (message: { role: string; content: string }) =>
+          message.role === "assistant" && message.content === "Repeated answer",
+      ),
+    ).toHaveLength(2);
+  });
   it("persists incoming chat attachments and stores user message with attachment metadata", async () => {
     mockPersistAttachments.mockResolvedValue([
       {
