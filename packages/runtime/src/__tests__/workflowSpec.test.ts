@@ -110,7 +110,7 @@ describe("runtime workflow spec + prompt policy", () => {
     const resolved = resolveRuntimePromptPolicy({
       runtimeId: "codex",
       capabilities: CODEX_CAPABILITIES,
-      runtimeOptions: {},
+      runtimeOptions: { codexSubagentStrategy: "native" },
       workflow,
     });
 
@@ -145,6 +145,29 @@ describe("runtime workflow spec + prompt policy", () => {
     expect(resolved.usedIsolatedSkillCommand).toBe(true);
     expect(resolved.usedFallbackSlashCommand).toBe(false);
     expect(resolved.prompt).toContain("/aif-implement @.ai-factory/PLAN.md");
+  });
+
+  it("defaults Codex native_subagents requests to isolated skill-command fallback until native strategy is explicitly enabled", () => {
+    const workflow = createRuntimeWorkflowSpec({
+      workflowKind: "implementer",
+      prompt: "Implement this feature",
+      agentDefinitionName: "implement-coordinator",
+      fallbackSlashCommand: "/aif-implement @.ai-factory/PLAN.md",
+      fallbackStrategy: "slash_command",
+      executionMode: "native_subagents",
+      requiredCapabilities: ["supportsAgentDefinitions"],
+    });
+
+    const resolved = resolveRuntimePromptPolicy({
+      runtimeId: "codex",
+      capabilities: CODEX_CAPABILITIES,
+      runtimeOptions: {},
+      workflow,
+    });
+
+    expect(resolved.usedNativeSubagentWorkflow).toBe(false);
+    expect(resolved.usedIsolatedSkillCommand).toBe(true);
+    expect(resolved.usedFallbackSlashCommand).toBe(false);
   });
 
   it("downgrades isolated skill-command mode to slash fallback when runtime lacks capability", () => {

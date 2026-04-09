@@ -17,9 +17,9 @@ export function resolveCodexSubagentStrategy(
 ): CodexSubagentStrategy | null {
   if (runtimeId !== "codex") return null;
   const configured = readString(asRecord(runtimeOptions)[CODEX_SUBAGENT_STRATEGY_OPTION]);
-  return configured === CODEX_SUBAGENT_STRATEGIES.isolated
-    ? CODEX_SUBAGENT_STRATEGIES.isolated
-    : CODEX_SUBAGENT_STRATEGIES.native;
+  return configured === CODEX_SUBAGENT_STRATEGIES.native
+    ? CODEX_SUBAGENT_STRATEGIES.native
+    : CODEX_SUBAGENT_STRATEGIES.isolated;
 }
 
 const NATIVE_SUBAGENT_WORKFLOW_GUIDANCE: Partial<Record<RuntimeWorkflowKind, string>> = {

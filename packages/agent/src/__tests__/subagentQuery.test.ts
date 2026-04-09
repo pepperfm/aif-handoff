@@ -584,7 +584,7 @@ describe("executeSubagentQuery codex native subagent mode", () => {
         providerId: "openai",
         transport: "sdk",
         defaultModel: "gpt-5.4",
-        options: {},
+        options: { codexSubagentStrategy: "native" },
       },
       taskRuntimeProfileId: null,
       projectRuntimeProfileId: "profile-codex",

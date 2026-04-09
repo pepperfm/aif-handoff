@@ -7,7 +7,7 @@ Autonomous task management system with Kanban board and AI subagents. Tasks flow
 ## Core Features
 
 - Kanban board with drag-and-drop task management
-- Automated task pipeline via pluggable runtime adapters (Claude, Codex, custom), with runtime-specific agent contracts
+- Automated task pipeline via pluggable runtime adapters (Claude, Codex, custom)
 - Real-time updates via WebSocket
 - Plan generation, implementation, and code review — all autonomous
 
@@ -40,9 +40,7 @@ Lint guard enforces DB boundaries: `api`, `agent`, and `runtime` can access DB o
 
 ## Agent Pipeline
 
-The coordinator polls every 30s and delegates through runtime-specific agent contracts:
-- **Claude path:** `.claude/agents/` custom agents
-- **Codex path:** `.codex/agents/` custom agents (native subagent orchestration on supported transports)
+The coordinator polls every 30s and delegates through runtime-resolved agent workflows:
 - **Backlog → Planning → Plan Ready:** `plan-coordinator` (iterative plan refinement)
 - **Plan Ready → Implementing → Review:** `implement-coordinator` (parallel task execution with workers/sidecars)
 - **Review → Done:** `review-sidecar` + `security-sidecar` (code review and security audit)
