@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -10,19 +11,22 @@ import type {
 } from "../../types.js";
 
 /**
- * Codex SDK persists threads in ~/.codex/sessions/.
- * Each session is a directory containing a JSONL conversation file.
+ * Codex SDK persists threads in ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl.
  * This module reads persisted session metadata for the RuntimeAdapter session API.
  */
 
 const SESSIONS_DIR = join(homedir(), ".codex", "sessions");
+const SESSION_FILE_PATTERN =
+  /(?:^|[/\\])rollout-[^/\\]*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
 interface CodexSessionMeta {
   id: string;
   model?: string;
   prompt?: string;
+  cwd?: string;
   createdAt: string;
   updatedAt: string;
+  filePath?: string;
 }
 
 function toIso(value: string | number | undefined): string {
@@ -35,6 +39,35 @@ function toIso(value: string | number | undefined): string {
     // fall through
   }
   return new Date().toISOString();
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function parseJsonLine(line: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(line));
+  } catch {
+    return null;
+  }
+}
+
+function sessionIdFromFilePath(filePath: string): string | null {
+  const match = SESSION_FILE_PATTERN.exec(filePath);
+  return match?.[1] ?? null;
+}
+
+function normalizePath(value: string | undefined): string | null {
+  if (!value) return null;
+  return value
+    .replace(/[\\/]+/g, "/")
+    .replace(/\/$/, "")
+    .toLowerCase();
 }
 
 function mapToRuntimeSession(
@@ -54,49 +87,98 @@ function mapToRuntimeSession(
   };
 }
 
-async function readSessionDirs(): Promise<CodexSessionMeta[]> {
-  let entries: string[];
+async function listSessionFiles(dir: string): Promise<string[]> {
+  let entries: Dirent[];
   try {
-    entries = await readdir(SESSIONS_DIR);
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return [];
   }
 
-  const sessions: CodexSessionMeta[] = [];
+  const files: string[] = [];
   for (const entry of entries) {
-    const sessionDir = join(SESSIONS_DIR, entry);
-    try {
-      const info = await stat(sessionDir);
-      if (!info.isDirectory()) continue;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listSessionFiles(fullPath)));
+      continue;
+    }
 
-      // Try reading session metadata from a meta.json or infer from directory
-      const metaPath = join(sessionDir, "meta.json");
-      let meta: CodexSessionMeta;
-      try {
-        const raw = await readFile(metaPath, "utf-8");
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        meta = {
-          id: entry,
-          model: typeof parsed.model === "string" ? parsed.model : undefined,
-          prompt: typeof parsed.prompt === "string" ? parsed.prompt : undefined,
-          createdAt: toIso(parsed.createdAt as string | number | undefined),
-          updatedAt: toIso(parsed.updatedAt as string | number | undefined),
-        };
-      } catch {
-        // No meta.json — fall back to directory timestamps
-        meta = {
-          id: entry,
-          createdAt: info.birthtime.toISOString(),
-          updatedAt: info.mtime.toISOString(),
-        };
-      }
-      sessions.push(meta);
-    } catch {
-      // Skip unreadable entries
+    if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      files.push(fullPath);
     }
   }
 
-  // Sort by updatedAt descending (most recent first)
+  return files;
+}
+
+async function readSessionMetaFromFile(filePath: string): Promise<CodexSessionMeta | null> {
+  const fallbackId = sessionIdFromFilePath(filePath);
+  if (!fallbackId) return null;
+
+  const info = await stat(filePath);
+  let raw = "";
+  try {
+    raw = await readFile(filePath, "utf-8");
+  } catch {
+    return {
+      id: fallbackId,
+      createdAt: info.birthtime.toISOString(),
+      updatedAt: info.mtime.toISOString(),
+      filePath,
+    };
+  }
+
+  let resolvedId = fallbackId;
+  let createdAt = info.birthtime.toISOString();
+  let model: string | undefined;
+  let prompt: string | undefined;
+  let cwd: string | undefined;
+
+  for (const line of raw.split("\n")) {
+    const entry = parseJsonLine(line);
+    if (!entry) continue;
+
+    if (readString(entry.type) === "session_meta") {
+      const payload = asRecord(entry.payload);
+      resolvedId = readString(payload?.id) ?? resolvedId;
+      createdAt = toIso(
+        (payload?.timestamp as string | number | undefined) ??
+          (entry.timestamp as string | number | undefined),
+      );
+      cwd = readString(payload?.cwd) ?? cwd;
+      model =
+        readString(payload?.model) ??
+        readString(payload?.model_slug) ??
+        readString(payload?.modelId);
+      continue;
+    }
+
+    if (readString(entry.type) === "event_msg") {
+      const payload = asRecord(entry.payload);
+      if (readString(payload?.type) === "user_message") {
+        prompt = readString(payload?.message) ?? prompt;
+        if (prompt) break;
+      }
+    }
+  }
+
+  return {
+    id: resolvedId,
+    model,
+    prompt,
+    cwd,
+    createdAt,
+    updatedAt: info.mtime.toISOString(),
+    filePath,
+  };
+}
+
+async function readSessionMetas(): Promise<CodexSessionMeta[]> {
+  const sessionFiles = await listSessionFiles(SESSIONS_DIR);
+  const sessions = (
+    await Promise.all(sessionFiles.map((filePath) => readSessionMetaFromFile(filePath)))
+  ).filter((session): session is CodexSessionMeta => Boolean(session));
+
   sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return sessions;
 }
@@ -104,54 +186,33 @@ async function readSessionDirs(): Promise<CodexSessionMeta[]> {
 export async function listCodexSdkSessions(
   input: RuntimeSessionListInput,
 ): Promise<RuntimeSession[]> {
-  const sessions = await readSessionDirs();
-  const mapped = sessions.map((s) => mapToRuntimeSession(s, input.profileId));
+  const sessions = await readSessionMetas();
+  const projectRoot = normalizePath(input.projectRoot);
+  const filteredSessions = projectRoot
+    ? sessions.filter((session) => normalizePath(session.cwd) === projectRoot)
+    : sessions;
+  const mapped = filteredSessions.map((session) => mapToRuntimeSession(session, input.profileId));
   return input.limit ? mapped.slice(0, input.limit) : mapped;
 }
 
 export async function getCodexSdkSession(
   input: RuntimeSessionGetInput,
 ): Promise<RuntimeSession | null> {
-  const sessionDir = join(SESSIONS_DIR, input.sessionId);
-  try {
-    const info = await stat(sessionDir);
-    if (!info.isDirectory()) return null;
-
-    const metaPath = join(sessionDir, "meta.json");
-    let meta: CodexSessionMeta;
-    try {
-      const raw = await readFile(metaPath, "utf-8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      meta = {
-        id: input.sessionId,
-        model: typeof parsed.model === "string" ? parsed.model : undefined,
-        prompt: typeof parsed.prompt === "string" ? parsed.prompt : undefined,
-        createdAt: toIso(parsed.createdAt as string | number | undefined),
-        updatedAt: toIso(parsed.updatedAt as string | number | undefined),
-      };
-    } catch {
-      meta = {
-        id: input.sessionId,
-        createdAt: info.birthtime.toISOString(),
-        updatedAt: info.mtime.toISOString(),
-      };
-    }
-    return mapToRuntimeSession(meta, input.profileId);
-  } catch {
-    return null;
-  }
+  const session = (await readSessionMetas()).find((meta) => meta.id === input.sessionId);
+  return session ? mapToRuntimeSession(session, input.profileId) : null;
 }
 
 export async function listCodexSdkSessionEvents(
   input: RuntimeSessionEventsInput,
 ): Promise<RuntimeEvent[]> {
-  const sessionDir = join(SESSIONS_DIR, input.sessionId);
+  const session = (await readSessionMetas()).find((meta) => meta.id === input.sessionId);
+  if (!session?.filePath) {
+    return [];
+  }
 
-  // Try reading the JSONL conversation log
-  const conversationPath = join(sessionDir, "conversation.jsonl");
   let lines: string[];
   try {
-    const raw = await readFile(conversationPath, "utf-8");
+    const raw = await readFile(session.filePath, "utf-8");
     lines = raw.split("\n").filter((line) => line.trim().length > 0);
   } catch {
     return [];
@@ -159,31 +220,35 @@ export async function listCodexSdkSessionEvents(
 
   const events: RuntimeEvent[] = [];
   for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as Record<string, unknown>;
-      const type = typeof entry.type === "string" ? entry.type : "unknown";
-      const text =
-        typeof entry.text === "string"
-          ? entry.text
-          : typeof entry.message === "string"
-            ? entry.message
-            : "";
+    const entry = parseJsonLine(line);
+    if (!entry || readString(entry.type) !== "event_msg") continue;
 
-      if (!text) continue;
+    const payload = asRecord(entry.payload);
+    const payloadType = readString(payload?.type);
+    const text = readString(payload?.message);
+    if (!payloadType || !text) continue;
 
-      events.push({
-        type: "session-message",
-        timestamp: toIso(entry.timestamp as string | number | undefined),
-        level: "info",
-        message: text,
-        data: {
-          role: type.includes("user") ? "user" : "assistant",
-          id: typeof entry.id === "string" ? entry.id : undefined,
-        },
-      });
-    } catch {
-      // Skip malformed lines
+    if (payloadType === "agent_message") {
+      const phase = readString(payload?.phase);
+      if (phase && phase !== "final_answer") {
+        continue;
+      }
     }
+
+    if (payloadType !== "user_message" && payloadType !== "agent_message") {
+      continue;
+    }
+
+    events.push({
+      type: "session-message",
+      timestamp: toIso(entry.timestamp as string | number | undefined),
+      level: "info",
+      message: text,
+      data: {
+        role: payloadType === "user_message" ? "user" : "assistant",
+        id: readString(payload?.turn_id) ?? readString(payload?.id),
+      },
+    });
   }
 
   return input.limit ? events.slice(-input.limit) : events;
