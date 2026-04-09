@@ -229,6 +229,31 @@ describe("chat API", () => {
     );
   });
 
+  it("returns assistant text in HTTP response when websocket clientId is absent", async () => {
+    mockAdapterRun.mockResolvedValueOnce({
+      outputText: "runtime output without ws",
+      sessionId: "runtime-session-1",
+    });
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "plain prompt",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(
+      expect.objectContaining({
+        sessionId: "session-1",
+        assistantMessage: "runtime output without ws",
+      }),
+    );
+    expect(mockSendToClient).not.toHaveBeenCalled();
+  });
+
   it("uses adapter.resume and prefixes prompt with /aif-explore", async () => {
     mockFindChatSessionById.mockReturnValue({
       id: "session-1",

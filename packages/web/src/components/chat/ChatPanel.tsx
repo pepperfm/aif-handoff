@@ -37,12 +37,20 @@ import type { ChatAttachment } from "@aif/shared/browser";
 interface ChatPanelProps {
   isOpen: boolean;
   projectId: string | null;
+  projectName: string | null;
   taskId: string | null;
   onClose: () => void;
   onOpenTask?: (taskId: string) => void;
 }
 
-export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: ChatPanelProps) {
+export function ChatPanel({
+  isOpen,
+  projectId,
+  projectName,
+  taskId,
+  onClose,
+  onOpenTask,
+}: ChatPanelProps) {
   const [showSessions, setShowSessions] = useState(false);
 
   const {
@@ -64,7 +72,7 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
     sendMessage,
     clearMessages,
     newSession,
-  } = useChat(projectId, activeSessionId, taskId);
+  } = useChat(projectId, activeSessionId, taskId, setActiveSessionId);
 
   const { data: currentTask } = useTask(taskId);
   const { data: effectiveChatRuntime } = useEffectiveChatRuntime(projectId);
@@ -242,6 +250,10 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
           </div>
         )}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>Project:</span>
+          <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px] font-medium">
+            {projectName ?? "No project"}
+          </Badge>
           <span>Profile:</span>
           <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px] font-medium">
             {activeRuntimeProfileName}
@@ -265,6 +277,7 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
             <SessionList
               sessions={sessions}
               activeSessionId={activeSessionId}
+              projectName={projectName}
               onSelect={handleSessionSelect}
               onCreate={handleNewChat}
               onDelete={handleDeleteSession}
@@ -293,7 +306,9 @@ export function ChatPanel({ isOpen, projectId, taskId, onClose, onOpenTask }: Ch
           {messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
               <Bot className="h-8 w-8 opacity-30" />
-              <p className="text-xs">Ask anything about this project</p>
+              <p className="text-xs">
+                Ask anything about {projectName ? `"${projectName}"` : "this project"}
+              </p>
             </div>
           )}
           {messages.map((msg, i) => (

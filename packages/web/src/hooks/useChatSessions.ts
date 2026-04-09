@@ -1,13 +1,19 @@
 import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ChatSession, ChatSessionMessage } from "@aif/shared/browser";
-import { api } from "../lib/api.js";
+import { api } from "@/lib/api";
 
 export function useChatSessions(projectId: string | null) {
   const queryClient = useQueryClient();
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  // When true, user explicitly started a new chat — don't auto-select
-  const [newChatMode, setNewChatMode] = useState(false);
+  const [activeSessionScope, setActiveSessionScope] = useState<{
+    projectId: string | null;
+    sessionId: string | null;
+  }>({
+    projectId: null,
+    sessionId: null,
+  });
+  // When true, user explicitly started a new chat - don't auto-select
+  const [newChatScopeProjectId, setNewChatScopeProjectId] = useState<string | null>(null);
 
   const sessionsQuery = useQuery<ChatSession[]>({
     queryKey: ["chatSessions", projectId],
@@ -16,6 +22,10 @@ export function useChatSessions(projectId: string | null) {
     staleTime: 2_000,
   });
 
+  const activeSessionId =
+    activeSessionScope.projectId === projectId ? activeSessionScope.sessionId : null;
+  const newChatMode = newChatScopeProjectId === projectId;
+
   // Auto-select the most recent session when sessions load and none is active
   const resolvedSessionId =
     activeSessionId ?? (newChatMode ? null : (sessionsQuery.data?.[0]?.id ?? null));
@@ -23,9 +33,9 @@ export function useChatSessions(projectId: string | null) {
   // Pin the auto-selected session so it doesn't shift when the sessions list refetches
   const pinActiveSession = useCallback(() => {
     if (!activeSessionId && resolvedSessionId) {
-      setActiveSessionId(resolvedSessionId);
+      setActiveSessionScope({ projectId, sessionId: resolvedSessionId });
     }
-  }, [activeSessionId, resolvedSessionId]);
+  }, [activeSessionId, projectId, resolvedSessionId]);
 
   // Listen for WS events to invalidate sessions
   useEffect(() => {
@@ -47,7 +57,8 @@ export function useChatSessions(projectId: string | null) {
     onSuccess: (session) => {
       console.debug("[useChatSessions] Created session %s", session.id);
       queryClient.invalidateQueries({ queryKey: ["chatSessions", projectId] });
-      setActiveSessionId(session.id);
+      setNewChatScopeProjectId(null);
+      setActiveSessionScope({ projectId, sessionId: session.id });
     },
   });
 
@@ -58,7 +69,7 @@ export function useChatSessions(projectId: string | null) {
       queryClient.invalidateQueries({ queryKey: ["chatSessions", projectId] });
       if (activeSessionId === deletedId) {
         const remaining = sessionsQuery.data?.filter((s) => s.id !== deletedId) ?? [];
-        setActiveSessionId(remaining[0]?.id ?? null);
+        setActiveSessionScope({ projectId, sessionId: remaining[0]?.id ?? null });
       }
     },
   });
@@ -94,15 +105,18 @@ export function useChatSessions(projectId: string | null) {
     [],
   );
 
-  const selectSession = useCallback((id: string) => {
-    setNewChatMode(false);
-    setActiveSessionId(id);
-  }, []);
+  const selectSession = useCallback(
+    (id: string) => {
+      setNewChatScopeProjectId(null);
+      setActiveSessionScope({ projectId, sessionId: id });
+    },
+    [projectId],
+  );
 
   const clearActiveSession = useCallback(() => {
-    setNewChatMode(true);
-    setActiveSessionId(null);
-  }, []);
+    setNewChatScopeProjectId(projectId);
+    setActiveSessionScope({ projectId, sessionId: null });
+  }, [projectId]);
 
   return {
     sessions: sessionsQuery.data ?? [],

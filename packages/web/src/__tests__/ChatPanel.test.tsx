@@ -71,6 +71,26 @@ const { ChatPanel } = await import("@/components/chat/ChatPanel");
 
 const mockOnClose = vi.fn();
 
+function renderPanel(
+  overrides: Partial<{
+    isOpen: boolean;
+    projectId: string | null;
+    projectName: string | null;
+    taskId: string | null;
+  }> = {},
+) {
+  return render(
+    <ChatPanel
+      isOpen={true}
+      projectId="p-1"
+      projectName="Project One"
+      taskId={null}
+      onClose={mockOnClose}
+      {...overrides}
+    />,
+  );
+}
+
 describe("ChatPanel", () => {
   beforeEach(() => {
     mockMessages = [];
@@ -101,7 +121,7 @@ describe("ChatPanel", () => {
       },
     };
 
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
 
     expect(screen.getByText("Profile:")).toBeDefined();
     expect(screen.getByText("GLM Claude")).toBeDefined();
@@ -111,9 +131,15 @@ describe("ChatPanel", () => {
     expect(screen.getByText("glm-5")).toBeDefined();
   });
 
+  it("shows the current project scope in the header", () => {
+    renderPanel();
+    expect(screen.getByText("Project:")).toBeDefined();
+    expect(screen.getByText("Project One")).toBeDefined();
+  });
+
   it("shows empty state when no messages", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
-    expect(screen.getByText("Ask anything about this project")).toBeDefined();
+    renderPanel();
+    expect(screen.getByText('Ask anything about "Project One"')).toBeDefined();
   });
 
   it("renders user and assistant messages", () => {
@@ -121,13 +147,13 @@ describe("ChatPanel", () => {
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi there!" },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("Hello")).toBeDefined();
     expect(screen.getByText("Hi there!")).toBeDefined();
   });
 
   it("sends message on Enter key", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const textarea = screen.getByPlaceholderText("Ask a question...");
     fireEvent.change(textarea, { target: { value: "test message" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
@@ -135,7 +161,7 @@ describe("ChatPanel", () => {
   });
 
   it("does not send message on Shift+Enter", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const textarea = screen.getByPlaceholderText("Ask a question...");
     fireEvent.change(textarea, { target: { value: "test" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
@@ -143,7 +169,7 @@ describe("ChatPanel", () => {
   });
 
   it("sends message on send button click", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const textarea = screen.getByPlaceholderText("Ask a question...");
     fireEvent.change(textarea, { target: { value: "hello" } });
     const sendButton = screen.getByLabelText("Send message");
@@ -152,7 +178,7 @@ describe("ChatPanel", () => {
   });
 
   it("shows Explore checkbox toggle", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("Explore")).toBeDefined();
     const checkbox = screen.getByRole("checkbox");
     fireEvent.click(checkbox);
@@ -162,7 +188,7 @@ describe("ChatPanel", () => {
   it("shows typing indicator when streaming and no assistant message yet", () => {
     mockIsStreaming = true;
     mockMessages = [{ role: "user", content: "Hello" }];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("Working...")).toBeDefined();
   });
 
@@ -172,12 +198,12 @@ describe("ChatPanel", () => {
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Partial..." },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("Working...")).toBeDefined();
   });
 
   it("clears messages on clear button click", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const clearButton = screen.getByLabelText("Clear messages");
     fireEvent.click(clearButton);
     expect(mockClearMessages).toHaveBeenCalledOnce();
@@ -185,7 +211,7 @@ describe("ChatPanel", () => {
 
   it("shows usage limit banner when chat error code is CHAT_USAGE_LIMIT", () => {
     mockChatErrorCode = "CHAT_USAGE_LIMIT";
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("Usage Limit Reached")).toBeDefined();
     expect(
       screen.getByText(
@@ -195,32 +221,32 @@ describe("ChatPanel", () => {
   });
 
   it("calls onClose when close button is clicked", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const closeButton = screen.getByLabelText("Close chat");
     fireEvent.click(closeButton);
     expect(mockOnClose).toHaveBeenCalledOnce();
   });
 
   it("calls onClose when Escape is pressed", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(mockOnClose).toHaveBeenCalledOnce();
   });
 
   it("calls onClose on outside click", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     fireEvent.pointerDown(document.body);
     expect(mockOnClose).toHaveBeenCalledOnce();
   });
 
   it("does not call onClose on inside click", () => {
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     fireEvent.pointerDown(screen.getByText("AI Chat"));
     expect(mockOnClose).not.toHaveBeenCalled();
   });
 
   it("is hidden when isOpen is false", () => {
-    render(<ChatPanel isOpen={false} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel({ isOpen: false });
     // Portal renders to document.body
     const panel = document.body.querySelector("[class*='-translate-x-full']");
     expect(panel).not.toBeNull();
@@ -234,7 +260,7 @@ describe("ChatPanel", () => {
         attachments: [{ name: "report.csv", mimeType: "text/csv", size: 1234 }],
       },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("report.csv")).toBeDefined();
   });
 
@@ -250,7 +276,7 @@ describe("ChatPanel", () => {
         ],
       },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     expect(screen.getByText("photo1.jpg")).toBeDefined();
     expect(screen.getByText("photo2.png")).toBeDefined();
     expect(screen.getByText("data.json")).toBeDefined();
@@ -272,7 +298,7 @@ describe("ChatPanel", () => {
         ],
       },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const link = screen.getByText("doc.pdf").closest("a");
     expect(link).toBeDefined();
     expect(link!.getAttribute("href")).toBe("/chat/sessions/session-123/attachments/doc.pdf");
@@ -287,7 +313,7 @@ describe("ChatPanel", () => {
         attachments: [{ name: "new-file.txt", mimeType: "text/plain", size: 100 }],
       },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const el = screen.getByText("new-file.txt");
     expect(el.closest("a")).toBeNull();
     expect(el.closest("span")).toBeDefined();
@@ -309,14 +335,14 @@ describe("ChatPanel", () => {
         ],
       },
     ];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     const el = screen.getByText("file.txt");
     expect(el.closest("a")).toBeNull();
   });
 
   it("does not render attachment section when message has no attachments", () => {
     mockMessages = [{ role: "user", content: "Plain message" }];
-    render(<ChatPanel isOpen={true} projectId="p-1" taskId={null} onClose={mockOnClose} />);
+    renderPanel();
     // Portal renders to document.body — query there
     const messageBubbles = document.body.querySelectorAll(".bg-blue-600\\/15");
     expect(messageBubbles.length).toBe(1);

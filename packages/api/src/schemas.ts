@@ -135,7 +135,7 @@ export const chatAttachmentSchema = z.object({
 export const chatRequestSchema = z.object({
   projectId: z.string().min(1, "Project ID is required"),
   message: z.string().min(1, "Message is required").max(50_000),
-  clientId: z.string().min(1, "Client ID is required"),
+  clientId: z.string().min(1, "Client ID is required").optional(),
   conversationId: z.string().optional(),
   sessionId: z.string().optional(),
   explore: z.boolean().default(false),

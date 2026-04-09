@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 
 const mockSendChatMessage = vi.fn();
 const mockGetChatSessionMessages = vi.fn();
+const mockGetWsClientId = vi.fn();
+const WS_CLIENT_ID_WAIT_TIMEOUT_MS = 500;
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -12,7 +14,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("@/hooks/useWebSocket", () => ({
-  getWsClientId: () => "test-client-id",
+  getWsClientId: () => mockGetWsClientId(),
 }));
 
 const { useChat } = await import("@/hooks/useChat");
@@ -21,6 +23,8 @@ describe("useChat", () => {
   beforeEach(() => {
     mockSendChatMessage.mockReset();
     mockGetChatSessionMessages.mockReset();
+    mockGetWsClientId.mockReset();
+    mockGetWsClientId.mockReturnValue("test-client-id");
     mockSendChatMessage.mockResolvedValue({ conversationId: "conv-1", sessionId: "sess-1" });
     mockGetChatSessionMessages.mockResolvedValue([]);
   });
@@ -232,6 +236,58 @@ describe("useChat", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("falls back to HTTP response when websocket clientId is unavailable", async () => {
+    vi.useFakeTimers();
+    mockGetWsClientId.mockReturnValue(null);
+    mockSendChatMessage.mockResolvedValueOnce({
+      conversationId: "conv-http-1",
+      sessionId: "sess-http-1",
+      assistantMessage: "HTTP fallback reply",
+    });
+
+    const { result } = renderHook(() => useChat("p-1"));
+
+    try {
+      await act(async () => {
+        const sendPromise = result.current.sendMessage("Hello");
+        await vi.advanceTimersByTimeAsync(WS_CLIENT_ID_WAIT_TIMEOUT_MS);
+        await sendPromise;
+        await vi.advanceTimersByTimeAsync(150);
+      });
+
+      expect(mockSendChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p-1",
+          message: "Hello",
+        }),
+      );
+      expect(mockSendChatMessage.mock.calls[0][0].clientId).toBeUndefined();
+      expect(result.current.messages).toEqual([
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "HTTP fallback reply" },
+      ]);
+      expect(result.current.isStreaming).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("promotes the resolved session id after the first send", async () => {
+    const handleSessionResolved = vi.fn();
+    mockSendChatMessage.mockResolvedValueOnce({
+      conversationId: "conv-2",
+      sessionId: "sess-2",
+    });
+
+    const { result } = renderHook(() => useChat("p-1", null, null, handleSessionResolved));
+
+    await act(async () => {
+      await result.current.sendMessage("Hello");
+    });
+
+    expect(handleSessionResolved).toHaveBeenCalledWith("sess-2");
+  });
+
   it("does not duplicate error message when ws chat:error and http failure happen together", async () => {
     let rejectSend: ((reason?: unknown) => void) | null = null;
     mockSendChatMessage.mockImplementationOnce(
@@ -246,6 +302,7 @@ describe("useChat", () => {
     const sendPromise = act(async () => {
       await result.current.sendMessage("Hello");
     });
+    await waitFor(() => expect(mockSendChatMessage).toHaveBeenCalledTimes(1));
 
     const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
 
@@ -264,6 +321,58 @@ describe("useChat", () => {
       (m) => m.role === "assistant" && m.content === "Chat request failed",
     );
     expect(assistantErrors).toHaveLength(1);
+  });
+
+  it("keeps the websocket stream active after the first token arrives", async () => {
+    vi.useFakeTimers();
+    mockSendChatMessage.mockResolvedValueOnce({
+      conversationId: "conv-stream-1",
+      sessionId: "sess-stream-1",
+      assistantMessage: "HTTP fallback reply",
+    });
+
+    const { result } = renderHook(() => useChat("p-1"));
+
+    try {
+      await act(async () => {
+        await result.current.sendMessage("Hello");
+      });
+
+      const conversationId = mockSendChatMessage.mock.calls[0][0].conversationId as string;
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent("chat:token", {
+            detail: { conversationId, token: "Hello " },
+          }),
+        );
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+
+      expect(result.current.isStreaming).toBe(true);
+      expect(result.current.messages[result.current.messages.length - 1]).toEqual({
+        role: "assistant",
+        content: "Hello ",
+      });
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent("chat:token", {
+            detail: { conversationId, token: "world!" },
+          }),
+        );
+      });
+
+      expect(result.current.messages[result.current.messages.length - 1]).toEqual({
+        role: "assistant",
+        content: "Hello world!",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("toggles explore mode", () => {

@@ -742,7 +742,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   log.info(
     {
       projectId,
-      clientId,
+      clientId: clientId ?? null,
       conversationId: chatConversationId,
       sessionId: chatSessionId,
       runtimeId,
@@ -801,6 +801,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     let hasStreamedTokens = false;
 
     const sendToken = (text: string) => {
+      if (!clientId) return;
       const tokenEvent: WsEvent = {
         type: "chat:token",
         payload: { conversationId: chatConversationId, token: text },
@@ -927,11 +928,14 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       type: "chat:done",
       payload: { conversationId: chatConversationId },
     };
-    sendToClient(clientId, doneEvent);
+    if (clientId) {
+      sendToClient(clientId, doneEvent);
+    }
 
     return c.json({
       conversationId: chatConversationId,
       sessionId: chatSessionId,
+      assistantMessage: fullAssistantResponse || null,
       runtime: {
         runtimeId,
         profileId: runtimeProfileId,
@@ -954,13 +958,17 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         code: classified.code,
       },
     };
-    sendToClient(clientId, errorEvent);
+    if (clientId) {
+      sendToClient(clientId, errorEvent);
+    }
 
     const doneEvent: WsEvent = {
       type: "chat:done",
       payload: { conversationId: chatConversationId },
     };
-    sendToClient(clientId, doneEvent);
+    if (clientId) {
+      sendToClient(clientId, doneEvent);
+    }
 
     return c.json({ error: classified.message, code: classified.code }, classified.status);
   }
