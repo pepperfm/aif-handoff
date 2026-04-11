@@ -259,12 +259,25 @@ export interface RuntimeMcpInput {
   serverName: string;
 }
 
-export interface RuntimeMcpInstallInput extends RuntimeMcpInput {
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: Record<string, string>;
-}
+export type RuntimeMcpInstallInput =
+  | (RuntimeMcpInput & {
+      transport?: "stdio";
+      command: string;
+      args?: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+      url?: never;
+      bearerTokenEnvVar?: never;
+    })
+  | (RuntimeMcpInput & {
+      transport: "streamable_http";
+      url: string;
+      bearerTokenEnvVar?: string;
+      command?: never;
+      args?: never;
+      cwd?: never;
+      env?: never;
+    });
 
 export interface RuntimeMcpStatus {
   installed: boolean;
