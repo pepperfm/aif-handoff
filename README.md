@@ -17,7 +17,7 @@ Use the runtime that fits your stack today, then switch per project/task without
 - **OpenRouter (`openrouter`)** — API transport
 - **OpenCode (`opencode`)** — API transport
 
-> **⚠️ Warning:** Anthropic prohibits using Claude Max / Pro subscriptions outside of the official Claude Code CLI. The SDK transport for Claude calls the Agent SDK directly, which may violate these terms. Use it at your own risk — consider API transport with an `ANTHROPIC_API_KEY` for production use.
+> **⚠️ Warning:** Anthropic prohibits using Claude Max / Pro subscriptions outside of the official Claude Code CLI. The SDK transport for Claude calls the Agent SDK directly, which may violate these terms. If you're worried about your subscription getting blocked, use the **CLI transport** — it runs through the official Claude Code CLI and is safe to use on a Max / Pro subscription. Use the SDK transport at your own risk, or switch to the API transport with an `ANTHROPIC_API_KEY` for production use.
 
 Need something custom? Add your own runtime adapter module and load it at startup via `AIF_RUNTIME_MODULES` (comma-separated module specifiers). No fork required.
 
