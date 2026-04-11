@@ -297,6 +297,44 @@ describe("runClaudeCli", () => {
     expect(cliArgs).toContain("claude-opus-4-1");
   });
 
+  it("includes --effort flag when options.effort is set to a valid level", async () => {
+    const input = createInput({ options: { effort: "high" } });
+    const promise = runClaudeCli(input);
+
+    simulateStreamAndClose(0, successfulStream({ sessionId: "sess-effort", text: "Done" }));
+
+    await promise;
+
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).toContain("--effort");
+    expect(cliArgs[cliArgs.indexOf("--effort") + 1]).toBe("high");
+  });
+
+  it("normalizes numeric effort values to named levels on the CLI", async () => {
+    const input = createInput({ options: { effort: 4 } });
+    const promise = runClaudeCli(input);
+
+    simulateStreamAndClose(0, successfulStream({ sessionId: "sess-effort-num", text: "Done" }));
+
+    await promise;
+
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).toContain("--effort");
+    expect(cliArgs[cliArgs.indexOf("--effort") + 1]).toBe("max");
+  });
+
+  it("omits --effort when options.effort is not provided or invalid", async () => {
+    const input = createInput({ options: { effort: "bogus" } });
+    const promise = runClaudeCli(input);
+
+    simulateStreamAndClose(0, successfulStream({ sessionId: "sess-no-effort", text: "Done" }));
+
+    await promise;
+
+    const { cliArgs } = getSpawnInvocation();
+    expect(cliArgs).not.toContain("--effort");
+  });
+
   it("includes --resume flag for session continuation", async () => {
     const input = createInput({ resume: true, sessionId: "sess-existing" });
     const promise = runClaudeCli(input);

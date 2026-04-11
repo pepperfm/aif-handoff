@@ -8,6 +8,7 @@ import {
   withProcessTimeouts,
 } from "../../timeouts.js";
 import { classifyClaudeResultSubtype, classifyClaudeRuntimeError } from "./errors.js";
+import { normalizeClaudeEffort } from "./options.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -171,6 +172,12 @@ function buildCliArgs(input: RuntimeRunInput): string[] {
   // Model override
   if (input.model) {
     args.push("--model", input.model);
+  }
+
+  // Effort level (low, medium, high, max)
+  const effort = normalizeClaudeEffort(options.effort);
+  if (effort) {
+    args.push("--effort", effort);
   }
 
   // Max turns
