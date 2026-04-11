@@ -321,7 +321,7 @@ describe("chat API", () => {
     );
   });
 
-  it("returns 500 and generic code for non-limit failures", async () => {
+  it("returns 500 with original error message for non-limit failures", async () => {
     mockAdapterRun.mockRejectedValue(new Error("unexpected failure"));
 
     const res = await app.request("/chat", {
@@ -332,6 +332,27 @@ describe("chat API", () => {
         message: "hello",
         clientId: "client-1",
         conversationId: "conv-error-1",
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "unexpected failure",
+      code: "CHAT_REQUEST_FAILED",
+    });
+  });
+
+  it("falls back to generic message when error has no message", async () => {
+    mockAdapterRun.mockRejectedValue(new Error(""));
+
+    const res = await app.request("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: "project-1",
+        message: "hello",
+        clientId: "client-1",
+        conversationId: "conv-error-2",
       }),
     });
 

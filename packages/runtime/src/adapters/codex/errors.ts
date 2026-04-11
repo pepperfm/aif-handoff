@@ -25,6 +25,10 @@ const RATE_LIMIT_PATTERNS = [
   "quota",
   "at capacity",
   "model is at capacity",
+  "hit your limit",
+  "limit reached",
+  "limit exceeded",
+  "out of credits",
 ];
 
 function messageFromUnknown(error: unknown): string {

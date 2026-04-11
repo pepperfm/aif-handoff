@@ -12,6 +12,16 @@ describe("Claude runtime error classification", () => {
     expect(classified.adapterCode).toBe("CLAUDE_USAGE_LIMIT");
   });
 
+  it.each([
+    "You've hit your limit · resets 5pm (Europe/Berlin)",
+    "Limit reached for claude-opus-4",
+    "Daily limit exceeded",
+  ])("classifies Claude limit phrasings: %s", (msg) => {
+    const classified = classifyClaudeRuntimeError(msg);
+    expect(classified.adapterCode).toBe("CLAUDE_USAGE_LIMIT");
+    expect(classified.category).toBe("rate_limit");
+  });
+
   it("classifies permission failures", () => {
     const classified = classifyClaudeRuntimeError(new Error("write permission denied"));
     expect(classified.adapterCode).toBe("CLAUDE_PERMISSION_DENIED");

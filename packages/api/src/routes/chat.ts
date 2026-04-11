@@ -161,7 +161,8 @@ function classifyChatError(err: unknown): {
   code: string;
   message: string;
 } {
-  const message = err instanceof Error ? err.message : String(err);
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const message = rawMessage?.trim() ? rawMessage.trim() : "Chat request failed";
 
   if (isRuntimeErrorCategory(err, "rate_limit")) {
     return { status: 429, code: "CHAT_USAGE_LIMIT", message };
@@ -171,7 +172,7 @@ function classifyChatError(err: unknown): {
     return { status: 500, code: "CHAT_AUTH_ERROR", message };
   }
 
-  return { status: 500, code: "CHAT_REQUEST_FAILED", message: "Chat request failed" };
+  return { status: 500, code: "CHAT_REQUEST_FAILED", message };
 }
 
 /** Runtime-aware input sanitization. Uses adapter.sanitizeInput if available, otherwise passthrough. */

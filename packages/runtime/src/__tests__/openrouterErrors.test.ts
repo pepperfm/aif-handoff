@@ -33,6 +33,10 @@ describe("classifyOpenRouterRuntimeError", () => {
     "HTTP 429",
     "insufficient_quota",
     "quota exceeded",
+    "You've hit your limit",
+    "Limit reached for the day",
+    "Limit exceeded",
+    "Out of credits",
   ])("classifies rate limit: %s", (msg) => {
     const err = classifyOpenRouterRuntimeError(new Error(msg));
     expect(err.adapterCode).toBe("OPENROUTER_RATE_LIMIT");

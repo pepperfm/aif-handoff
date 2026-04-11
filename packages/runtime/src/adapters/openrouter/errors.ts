@@ -7,6 +7,10 @@ const RATE_LIMIT_PATTERNS = [
   "429",
   "insufficient_quota",
   "quota",
+  "hit your limit",
+  "limit reached",
+  "limit exceeded",
+  "out of credits",
 ];
 const AUTH_PATTERNS = [
   "unauthorized",
