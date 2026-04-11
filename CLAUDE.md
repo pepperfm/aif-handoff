@@ -164,6 +164,10 @@ data/                    # SQLite database files (gitignored)
   - `implementer.ts` → `implement-coordinator` (spawns `implement-worker` + quality sidecars)
   - `reviewer.ts` → `review-sidecar` + `security-sidecar` (parallel review)
 
+## Package Checklist Rule
+
+**CRITICAL:** Check the `CHECKLIST.md` file and ensure all items are completed.
+
 ## UI Component Rules
 
 - **Reuse existing components first.** Before creating a new UI component, check `packages/web/src/components/ui/` for an existing primitive that fits the need. Compose existing primitives (e.g. `Dialog` + `Button`) instead of writing new wrappers.
@@ -190,5 +194,4 @@ data/                    # SQLite database files (gitignored)
 
 - Every package must maintain at least 70% test coverage (measured by @vitest/coverage-v8)
 - Write code following SOLID and DRY principles
-- Always run linter after implementation: `npm run lint`
-- Always run tests after implementation: `npm test`
+- Always run after implementation: `npm run ai:validate`

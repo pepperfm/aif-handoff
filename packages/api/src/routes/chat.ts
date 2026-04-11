@@ -41,7 +41,6 @@ import {
 import { chatRequestSchema, createChatSessionSchema, updateChatSessionSchema } from "../schemas.js";
 import { persistAttachments } from "../services/attachmentPersistence.js";
 import { readAttachment } from "../services/attachmentStorage.js";
-import { getCodexExecutionHooks } from "../services/codexExecutionHooks.js";
 import { broadcast, sendToClient } from "../ws.js";
 import {
   getCached,
@@ -161,7 +160,8 @@ function classifyChatError(err: unknown): {
   code: string;
   message: string;
 } {
-  const message = err instanceof Error ? err.message : String(err);
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const message = rawMessage?.trim() ? rawMessage.trim() : "Chat request failed";
 
   if (isRuntimeErrorCategory(err, "rate_limit")) {
     return { status: 429, code: "CHAT_USAGE_LIMIT", message };
@@ -171,7 +171,7 @@ function classifyChatError(err: unknown): {
     return { status: 500, code: "CHAT_AUTH_ERROR", message };
   }
 
-  return { status: 500, code: "CHAT_REQUEST_FAILED", message: "Chat request failed" };
+  return { status: 500, code: "CHAT_REQUEST_FAILED", message };
 }
 
 /** Runtime-aware input sanitization. Uses adapter.sanitizeInput if available, otherwise passthrough. */
@@ -236,6 +236,19 @@ function eventId(event: RuntimeEvent): string {
   return raw ?? crypto.randomUUID();
 }
 
+/**
+ * Normalize a message content string before matching it across runtime and DB
+ * sources. Runtime-side content is already `.trim()`ed by extractTextContent
+ * (and by Claude's session file parser which joins blocks with `\n\n` then
+ * trims), but DB content preserves the raw streamed string which may carry
+ * leading/trailing whitespace inherited from Claude's delta stream. Without
+ * normalization the exact-equality match in mergeRuntimeAndDbMessages fails
+ * and produces a duplicate after page reload.
+ */
+function normalizeContentForMatch(content: string): string {
+  return content.trim();
+}
+
 function mergeRuntimeAndDbMessages(
   runtimeMessages: ChatSessionMessage[],
   dbMessages: ChatSessionMessage[],
@@ -246,13 +259,17 @@ function mergeRuntimeAndDbMessages(
 
   const matchedRuntimeMessages = new Array(runtimeMessages.length).fill(false);
   const merged = runtimeMessages.map((message) => ({ ...message }));
+  const normalizedRuntimeContent = runtimeMessages.map((message) =>
+    normalizeContentForMatch(message.content),
+  );
 
   for (const dbMessage of dbMessages) {
+    const normalizedDbContent = normalizeContentForMatch(dbMessage.content);
     const matchIndex = runtimeMessages.findIndex(
       (runtimeMessage, index) =>
         !matchedRuntimeMessages[index] &&
         runtimeMessage.role === dbMessage.role &&
-        runtimeMessage.content === dbMessage.content,
+        normalizedRuntimeContent[index] === normalizedDbContent,
     );
 
     if (matchIndex === -1) {
@@ -673,6 +690,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   const body = c.req.valid("json") as ChatRequestPayload;
   const { projectId, message, clientId, conversationId, explore, taskId, attachments } = body;
   let { sessionId: inputSessionId } = body;
+  const env = getEnv();
 
   const project = findProjectById(projectId);
   if (!project) {
@@ -742,7 +760,7 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   log.info(
     {
       projectId,
-      clientId,
+      clientId: clientId ?? null,
       conversationId: chatConversationId,
       sessionId: chatSessionId,
       runtimeId,
@@ -796,11 +814,12 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       });
     }
 
-    const bypassPermissions = getEnv().AGENT_BYPASS_PERMISSIONS;
+    const bypassPermissions = env.AGENT_BYPASS_PERMISSIONS;
     let fullAssistantResponse = "";
     let hasStreamedTokens = false;
 
     const sendToken = (text: string) => {
+      if (!clientId) return;
       const tokenEvent: WsEvent = {
         type: "chat:token",
         payload: { conversationId: chatConversationId, token: text },
@@ -847,20 +866,18 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
           : {}),
       },
       execution: {
+        startTimeoutMs: env.API_RUNTIME_START_TIMEOUT_MS,
+        runTimeoutMs: env.API_RUNTIME_RUN_TIMEOUT_MS,
         includePartialMessages: true,
-        maxTurns: getEnv().AGENT_CHAT_MAX_TURNS,
+        maxTurns: env.AGENT_CHAT_MAX_TURNS,
         onEvent: onRuntimeEvent,
         systemPromptAppend: systemAppend,
+        bypassPermissions,
         environment: {
           HANDOFF_MODE: "1",
           ...(taskId ? { HANDOFF_TASK_ID: taskId } : {}),
         },
         hooks: {
-          ...getCodexExecutionHooks({
-            runtimeId,
-            transport: runtimeContext.resolvedProfile.transport,
-            bypassPermissions,
-          }),
           permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
           allowDangerouslySkipPermissions: bypassPermissions,
           _trustToken: RUNTIME_TRUST_TOKEN,
@@ -912,11 +929,15 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     }
 
     // Persist assistant response in local chat history for both fresh and resumed runtime sessions.
-    if (chatSessionId && fullAssistantResponse) {
+    // Trim leading/trailing whitespace so the stored content matches what
+    // Claude's session-file parser returns (which does `.trim()`), keeping
+    // mergeRuntimeAndDbMessages dedupe consistent on page reload.
+    const persistedAssistantResponse = fullAssistantResponse.trim();
+    if (chatSessionId && persistedAssistantResponse) {
       createChatMessage({
         sessionId: chatSessionId,
         role: "assistant",
-        content: fullAssistantResponse,
+        content: persistedAssistantResponse,
       });
     }
     if (chatSessionId) {
@@ -927,11 +948,14 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
       type: "chat:done",
       payload: { conversationId: chatConversationId },
     };
-    sendToClient(clientId, doneEvent);
+    if (clientId) {
+      sendToClient(clientId, doneEvent);
+    }
 
     return c.json({
       conversationId: chatConversationId,
       sessionId: chatSessionId,
+      assistantMessage: fullAssistantResponse || null,
       runtime: {
         runtimeId,
         profileId: runtimeProfileId,
@@ -954,13 +978,17 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
         code: classified.code,
       },
     };
-    sendToClient(clientId, errorEvent);
+    if (clientId) {
+      sendToClient(clientId, errorEvent);
+    }
 
     const doneEvent: WsEvent = {
       type: "chat:done",
       payload: { conversationId: chatConversationId },
     };
-    sendToClient(clientId, doneEvent);
+    if (clientId) {
+      sendToClient(clientId, doneEvent);
+    }
 
     return c.json({ error: classified.message, code: classified.code }, classified.status);
   }

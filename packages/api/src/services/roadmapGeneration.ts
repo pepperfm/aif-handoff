@@ -1,12 +1,13 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { z } from "zod";
-import { logger, getEnv, getProjectConfig } from "@aif/shared";
+import { logger, getEnv, getProjectConfig, generatePlanPath } from "@aif/shared";
 import {
   createTask,
   findProjectById,
   findTasksByRoadmapAlias,
   incrementTaskTokenUsage,
+  listTasks,
 } from "@aif/data";
 import { resolveApiLightModel, runApiRuntimeOneShot } from "./runtime.js";
 
@@ -58,6 +59,12 @@ export interface GenerateRoadmapFileResult {
  * Reads DESCRIPTION.md and ARCHITECTURE.md for context, then produces
  * a strategic milestone roadmap.
  */
+/** Extract roadmap content from agent outputText, stripping markdown fences if present. */
+function extractRoadmapContent(raw: string): string {
+  const fenceMatch = raw.match(/```(?:markdown)?\s*\n([\s\S]*?)\n\s*```/);
+  return fenceMatch ? fenceMatch[1].trim() : raw.trim();
+}
+
 export async function generateRoadmapFile(
   input: GenerateRoadmapFileInput,
 ): Promise<GenerateRoadmapFileResult> {
@@ -99,17 +106,15 @@ export async function generateRoadmapFile(
     architecture,
     vision: vision ?? null,
   });
-  const prompt = `/aif-roadmap generate\n\n${basePrompt}`;
-
   let rawResult = "";
   try {
     const { result } = await runApiRuntimeOneShot({
       projectId,
       projectRoot: project.rootPath,
-      prompt,
+      prompt: basePrompt,
       workflowKind: "roadmap-generate",
       systemPromptAppend:
-        "Do not use tools or subagents. Reply directly with the ROADMAP.md content in markdown format. No JSON, no code fences around the entire output.",
+        "Do not spawn subagents. Reply directly with the ROADMAP.md content in markdown format. No JSON, no code fences around the entire output.",
     });
     rawResult = (result.outputText ?? "").trim();
   } catch (err) {
@@ -120,18 +125,29 @@ export async function generateRoadmapFile(
     );
   }
 
-  if (!rawResult) {
-    throw new RoadmapGenerationError("EMPTY_RESPONSE", "Agent returned empty roadmap");
-  }
-
-  // Strip markdown fences if agent wrapped the whole output
-  const content = rawResult.replace(/^```(?:markdown)?\s*/m, "").replace(/\s*```\s*$/m, "");
-
-  // Write ROADMAP.md
+  // Write ROADMAP.md — agent may have already written the file via tools (CLI mode),
+  // so check the file first before falling back to outputText.
   const cfg = getProjectConfig(project.rootPath);
   const roadmapPath = join(project.rootPath, cfg.paths.roadmap);
   mkdirSync(dirname(roadmapPath), { recursive: true });
-  writeFileSync(roadmapPath, content, "utf8");
+
+  let content: string;
+  if (existsSync(roadmapPath)) {
+    const fileContent = readFileSync(roadmapPath, "utf8").trim();
+    // Verify agent wrote a real roadmap, not just a stub
+    if (fileContent.length > 100 && (fileContent.includes("- [") || fileContent.includes("##"))) {
+      content = fileContent;
+      log.info({ projectId, roadmapPath, source: "file" }, "Using roadmap file written by agent");
+    } else {
+      content = extractRoadmapContent(rawResult);
+      writeFileSync(roadmapPath, content, "utf8");
+    }
+  } else if (rawResult) {
+    content = extractRoadmapContent(rawResult);
+    writeFileSync(roadmapPath, content, "utf8");
+  } else {
+    throw new RoadmapGenerationError("EMPTY_RESPONSE", "Agent returned empty roadmap");
+  }
 
   log.info({ projectId, roadmapPath, contentLength: content.length }, "Roadmap file generated");
 
@@ -228,7 +244,7 @@ export async function generateRoadmapTasks(
       workflowKind: "roadmap-extract",
       modelOverride: lightModel,
       systemPromptAppend:
-        "Do not use tools or subagents. Reply directly with JSON only. No markdown fences.",
+        "Do not spawn subagents. Reply directly with JSON only. No markdown fences, no explanatory text.",
     });
 
     if (trackingTaskId && result.usage) {
@@ -302,19 +318,67 @@ Rules:
 - Return ONLY valid JSON, no explanatory text`;
 }
 
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseAgentResponse(raw: string, expectedAlias: string): RoadmapGenerationResult {
-  // Strip markdown fences if agent included them despite instructions
-  const cleaned = raw.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "");
+  // Extract JSON from markdown fences — agent may include extra text after the closing fence
+  const fenceMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
+  const cleaned = fenceMatch ? fenceMatch[1].trim() : raw.trim();
 
   let jsonObj: unknown;
   try {
     jsonObj = JSON.parse(cleaned);
-  } catch (err) {
-    log.error({ raw: raw.slice(0, 500), err }, "Failed to parse agent response as JSON");
-    throw new RoadmapGenerationError(
-      "PARSE_ERROR",
-      `Agent response is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  } catch (initialErr) {
+    // Fallback: agent may have prepended prose before the JSON object
+    const extracted = extractJsonObject(cleaned);
+    if (extracted) {
+      try {
+        jsonObj = JSON.parse(extracted);
+      } catch (err) {
+        log.error({ raw: raw.slice(0, 500), err }, "Failed to parse agent response as JSON");
+        throw new RoadmapGenerationError(
+          "PARSE_ERROR",
+          `Agent response is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else {
+      log.error(
+        { raw: raw.slice(0, 500), err: initialErr },
+        "Failed to parse agent response as JSON",
+      );
+      throw new RoadmapGenerationError(
+        "PARSE_ERROR",
+        `Agent response is not valid JSON: ${initialErr instanceof Error ? initialErr.message : String(initialErr)}`,
+      );
+    }
   }
 
   const validated = roadmapResponseSchema.safeParse(jsonObj);
@@ -378,9 +442,57 @@ export function importGeneratedTasks(
 
   log.info({ projectId, alias, totalTasks: generatedTasks.length }, "Starting task import");
 
+  // Resolve project config so every imported task gets a unique slug-based
+  // planPath. Without this each task would fall back to the shared default
+  // `cfg.paths.plan` and overwrite the previous task's plan on disk
+  // (see lee-to/aif-handoff#55). planPath is decoupled from plannerMode here:
+  // the task keeps whatever planner mode the project defaults to, we only
+  // ensure the plan file path itself is unique for bulk imports.
+  const project = findProjectById(projectId);
+  if (!project) {
+    throw new RoadmapGenerationError("PROJECT_NOT_FOUND", `Project ${projectId} not found`);
+  }
+  const cfg = getProjectConfig(project.rootPath);
+
   // Load existing tasks for this alias for dedupe
   const existing = findTasksByRoadmapAlias(projectId, alias);
   const existingTitles = new Set(existing.map((t) => normalizeTitle(t.title)));
+
+  // Reserve every planPath already used by any task in this project (across
+  // all aliases), so collision suffixes don't accidentally overwrite an
+  // existing plan file. The shared default is excluded because it's not
+  // owned by any single task and stays safe to collide against.
+  const usedPlanPaths = new Set<string>(
+    listTasks(projectId)
+      .map((t) => t.planPath)
+      .filter((p): p is string => !!p && p !== cfg.paths.plan),
+  );
+
+  // Compute a unique plan path per task using the shared slug helper, and
+  // append `-2`, `-3`, … before `.md` if the base path collides with an
+  // already-reserved one. This covers both intra-batch collisions (two titles
+  // slugifying to the same string) and cross-import collisions (repeat
+  // imports or different aliases hitting the same slug).
+  const reserveUniquePlanPath = (title: string): string => {
+    const base = generatePlanPath(title, "full", {
+      plansDir: cfg.paths.plans,
+      defaultPlanPath: cfg.paths.plan,
+    });
+    if (!usedPlanPaths.has(base)) {
+      usedPlanPaths.add(base);
+      return base;
+    }
+    const suffixMatch = base.match(/^(.*)\.md$/);
+    const stem = suffixMatch ? suffixMatch[1] : base;
+    let counter = 2;
+    let candidate = `${stem}-${counter}.md`;
+    while (usedPlanPaths.has(candidate)) {
+      counter++;
+      candidate = `${stem}-${counter}.md`;
+    }
+    usedPlanPaths.add(candidate);
+    return candidate;
+  };
 
   const result: ImportResult = {
     roadmapAlias: alias,
@@ -403,12 +515,18 @@ export function importGeneratedTasks(
     }
 
     const tags = buildTaskTags(alias, genTask);
+    // "full" here is just the path-shape selector (`<plansDir>/<slug>.md`),
+    // NOT a planner-mode override — plannerMode is left untouched so the
+    // project/task defaults still apply (fast for regular projects,
+    // parallelEnabled projects already force full via POST /tasks).
+    const planPath = reserveUniquePlanPath(genTask.title);
     const created = createTask({
       projectId,
       title: genTask.title,
       description: genTask.description,
       roadmapAlias: alias,
       tags,
+      planPath,
       useSubagents: getEnv().AGENT_USE_SUBAGENTS,
     });
 
@@ -421,8 +539,13 @@ export function importGeneratedTasks(
   }
 
   log.info(
-    { projectId, alias, created: result.created, skipped: result.skipped },
-    "Task import complete",
+    {
+      projectId,
+      alias,
+      created: result.created,
+      skipped: result.skipped,
+    },
+    "Task import complete with distinct plan paths",
   );
 
   return result;

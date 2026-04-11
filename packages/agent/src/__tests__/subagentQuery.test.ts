@@ -77,44 +77,48 @@ vi.mock("@aif/data", async (importOriginal) => {
   };
 });
 
+const mockEnvOverrides: Record<string, unknown> = {};
+const baseMockEnv = {
+  ANTHROPIC_API_KEY: "test-key",
+  ANTHROPIC_BASE_URL: undefined,
+  OPENAI_API_KEY: undefined,
+  OPENAI_BASE_URL: undefined,
+  CODEX_CLI_PATH: undefined,
+  AIF_RUNTIME_MODULES: [],
+  AIF_DEFAULT_RUNTIME_ID: "claude",
+  AIF_DEFAULT_PROVIDER_ID: "anthropic",
+  PORT: 3009,
+  POLL_INTERVAL_MS: 30000,
+  AGENT_STAGE_STALE_TIMEOUT_MS: 90 * 60 * 1000,
+  AGENT_STAGE_STALE_MAX_RETRY: 3,
+  AGENT_STAGE_RUN_TIMEOUT_MS: 60 * 60 * 1000,
+  AGENT_QUERY_START_TIMEOUT_MS: 60 * 1000,
+  AGENT_QUERY_START_RETRY_DELAY_MS: 1000,
+  DATABASE_URL: "./data/aif.sqlite",
+  CORS_ORIGIN: "*",
+  API_BASE_URL: "http://localhost:3009",
+  AGENT_QUERY_AUDIT_ENABLED: true,
+  LOG_LEVEL: "debug",
+  ACTIVITY_LOG_MODE: "sync",
+  ACTIVITY_LOG_BATCH_SIZE: 20,
+  ACTIVITY_LOG_BATCH_MAX_AGE_MS: 5000,
+  ACTIVITY_LOG_QUEUE_LIMIT: 500,
+  AGENT_WAKE_ENABLED: true,
+  AGENT_BYPASS_PERMISSIONS: true,
+  COORDINATOR_MAX_CONCURRENT_TASKS: 3,
+  AGENT_CHAT_MAX_TURNS: 50,
+  AGENT_MAX_REVIEW_ITERATIONS: 3,
+  AGENT_USE_SUBAGENTS: true,
+  AGENT_FIRST_ACTIVITY_TIMEOUT_MS: 60_000,
+  TELEGRAM_BOT_TOKEN: undefined,
+  TELEGRAM_USER_ID: undefined,
+};
+
 vi.mock("@aif/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/shared")>();
   return {
     ...actual,
-    getEnv: () => ({
-      ANTHROPIC_API_KEY: "test-key",
-      ANTHROPIC_BASE_URL: undefined,
-      OPENAI_API_KEY: undefined,
-      OPENAI_BASE_URL: undefined,
-      CODEX_CLI_PATH: undefined,
-      AIF_RUNTIME_MODULES: [],
-      AIF_DEFAULT_RUNTIME_ID: "claude",
-      AIF_DEFAULT_PROVIDER_ID: "anthropic",
-      PORT: 3009,
-      POLL_INTERVAL_MS: 30000,
-      AGENT_STAGE_STALE_TIMEOUT_MS: 90 * 60 * 1000,
-      AGENT_STAGE_STALE_MAX_RETRY: 3,
-      AGENT_STAGE_RUN_TIMEOUT_MS: 60 * 60 * 1000,
-      AGENT_QUERY_START_TIMEOUT_MS: 60 * 1000,
-      AGENT_QUERY_START_RETRY_DELAY_MS: 1000,
-      DATABASE_URL: "./data/aif.sqlite",
-      CORS_ORIGIN: "*",
-      API_BASE_URL: "http://localhost:3009",
-      AGENT_QUERY_AUDIT_ENABLED: true,
-      LOG_LEVEL: "debug",
-      ACTIVITY_LOG_MODE: "sync",
-      ACTIVITY_LOG_BATCH_SIZE: 20,
-      ACTIVITY_LOG_BATCH_MAX_AGE_MS: 5000,
-      ACTIVITY_LOG_QUEUE_LIMIT: 500,
-      AGENT_WAKE_ENABLED: true,
-      AGENT_BYPASS_PERMISSIONS: true,
-      COORDINATOR_MAX_CONCURRENT_TASKS: 3,
-      AGENT_CHAT_MAX_TURNS: 50,
-      AGENT_MAX_REVIEW_ITERATIONS: 3,
-      AGENT_USE_SUBAGENTS: true,
-      TELEGRAM_BOT_TOKEN: undefined,
-      TELEGRAM_USER_ID: undefined,
-    }),
+    getEnv: () => ({ ...baseMockEnv, ...mockEnvOverrides }),
     logger: () => ({
       info: () => undefined,
       warn: () => undefined,
@@ -699,5 +703,125 @@ describe("executeSubagentQuery codex native subagent mode", () => {
     const passedPrompt = firstRunStreamedCall[0];
     expect(passedPrompt).toContain("$aif-implement @.ai-factory/PLAN.md");
     expect(passedPrompt).not.toContain("Use Codex native subagents for this workflow.");
+  });
+});
+
+describe("executeSubagentQuery first-activity watchdog", () => {
+  beforeEach(() => {
+    (globalThis as { __AIF_CLAUDE_QUERY_MOCK__?: typeof queryMock }).__AIF_CLAUDE_QUERY_MOCK__ =
+      queryMock;
+    queryMock.mockReset();
+    logActivityMock.mockReset();
+    findTaskByIdMock.mockReset();
+    resolveEffectiveRuntimeProfileMock.mockReset();
+    getTaskSessionIdMock.mockReturnValue(null);
+    findTaskByIdMock.mockReturnValue({
+      id: "task-1",
+      projectId: "project-1",
+      runtimeOptionsJson: null,
+      modelOverride: null,
+    });
+    resolveEffectiveRuntimeProfileMock.mockReturnValue({
+      source: "none",
+      profile: null,
+      taskRuntimeProfileId: null,
+      projectRuntimeProfileId: null,
+      systemRuntimeProfileId: null,
+    });
+  });
+
+  it("retries and eventually throws when agent stalls on all attempts", async () => {
+    // Use very short timeouts for the test
+    mockEnvOverrides.AGENT_FIRST_ACTIVITY_TIMEOUT_MS = 100;
+    mockEnvOverrides.AGENT_QUERY_START_TIMEOUT_MS = 0;
+
+    // queryMock is called as queryImpl({ prompt, options }).
+    // options.abortController is the per-attempt AbortController from executionIntent.
+    // In production, SDKs use this signal to cancel HTTP requests; here we simulate
+    // the same: yield once (pass start-timeout), then hang until abort fires.
+    queryMock.mockImplementation(
+      (input: { prompt: string; options: { abortController?: AbortController } }) => {
+        const ac = input.options?.abortController;
+        async function* hangUntilAbort() {
+          yield { type: "message", message: { type: "text", text: "thinking..." } };
+          await new Promise<void>((_, reject) => {
+            if (ac?.signal.aborted) {
+              reject(new Error("first_activity_timeout"));
+              return;
+            }
+            ac?.signal.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("first_activity_timeout"));
+              },
+              { once: true },
+            );
+          });
+        }
+        return hangUntilAbort();
+      },
+    );
+
+    await expect(
+      executeSubagentQuery({
+        taskId: "task-stall",
+        projectRoot: "/tmp/project",
+        agentName: "implement-coordinator",
+        prompt: "run",
+        workflowKind: "implementer",
+      }),
+    ).rejects.toThrow(/stalled|first_activity_timeout|timeout/i);
+
+    // Should have been called 3 times (1 initial + 2 retries)
+    expect(queryMock).toHaveBeenCalledTimes(3);
+
+    // Verify stall was logged in activity
+    const stallLogs = logActivityMock.mock.calls.filter(
+      (call: string[]) => call[1] === "Agent" && call[2]?.includes("stalled"),
+    );
+    expect(stallLogs.length).toBe(3);
+
+    delete mockEnvOverrides.AGENT_FIRST_ACTIVITY_TIMEOUT_MS;
+    delete mockEnvOverrides.AGENT_QUERY_START_TIMEOUT_MS;
+  }, 10_000);
+
+  it("treats streamed runtime events as activity for tool-less workflows", async () => {
+    mockEnvOverrides.AGENT_FIRST_ACTIVITY_TIMEOUT_MS = 100;
+    mockEnvOverrides.AGENT_QUERY_START_TIMEOUT_MS = 0;
+
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "system",
+        subtype: "init",
+        session_id: "session-tool-less",
+      };
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      yield {
+        type: "result",
+        subtype: "success",
+        result: "done-without-tools",
+        usage: {},
+        total_cost_usd: 0,
+      };
+    });
+
+    await expect(
+      executeSubagentQuery({
+        taskId: "task-tool-less",
+        projectRoot: "/tmp/project",
+        agentName: "implement-checklist-sync",
+        prompt: "run",
+        workflowKind: "implementer_checklist_sync",
+      }),
+    ).resolves.toEqual({ resultText: "done-without-tools" });
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    const stallLogs = logActivityMock.mock.calls.filter(
+      (call: string[]) => call[1] === "Agent" && call[2]?.includes("stalled"),
+    );
+    expect(stallLogs.length).toBe(0);
+
+    delete mockEnvOverrides.AGENT_FIRST_ACTIVITY_TIMEOUT_MS;
+    delete mockEnvOverrides.AGENT_QUERY_START_TIMEOUT_MS;
   });
 });

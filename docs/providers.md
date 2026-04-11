@@ -68,6 +68,17 @@ Capabilities are **transport-aware**: the same adapter may expose different capa
 | `cli`     | Spawn a subprocess, parse stdout      | `claude --agent ...`, `codex run --json` |
 | `api`     | HTTP POST to a remote endpoint        | OpenAI-compatible REST API               |
 
+#### Transport Observability Differences
+
+**SDK transport** streams events in real time — tool calls, subagent spawns, and partial messages are visible as they happen. The Agent Activity timeline shows each tool invocation with timestamps. The first-activity watchdog can detect hung agents within 60 seconds.
+
+**CLI and API transports** are opaque — the entire tool-calling cycle runs inside the subprocess or remote server. The coordinator only sees "agent started" and "agent complete/failed" with no intermediate events. Consequently:
+
+- **Agent Activity** shows only start/complete entries, not individual tool calls
+- **First-activity watchdog** is disabled (no `onToolUse` callbacks to monitor)
+- **Start timeout** (`AGENT_QUERY_START_TIMEOUT_MS`) is disabled — CLI/API produce output only after the full run completes, so the only protection is the run timeout (`AGENT_STAGE_RUN_TIMEOUT_MS`)
+- **Token usage** is reported as a single aggregate at the end of the run
+
 ## Built-In Adapter Examples
 
 ### Claude (SDK)
@@ -134,8 +145,10 @@ SDK-specific options:
 - `codexCliPath` — path to the `codex` binary (SDK wraps the CLI)
 - `codexConfig` — JSON object of CLI config overrides (flattened to `--config` flags)
 - `sandboxMode` — one of `read-only`, `workspace-write`, `danger-full-access`
+- `approvalPolicy` — one of `untrusted`, `on-failure`, `on-request`, `never`
 - `modelReasoningEffort` — one of `minimal`, `low`, `medium`, `high`, `xhigh`
 - `codexSubagentStrategy` — `native` (default) or `isolated`; use `isolated` as an escape hatch when you need the legacy fresh-session skill workflow instead of native Codex agents
+- `skipGitRepoCheck` — bypass the Codex guard that refuses to run outside a git repo (both SDK and CLI)
 
 > Migration note: older releases defaulted `codexSubagentStrategy` to `isolated`.
 > If you relied on the isolated skill-session path, set `codexSubagentStrategy: "isolated"` explicitly after upgrading.
@@ -158,6 +171,8 @@ SDK-specific options:
 }
 ```
 
+**`codexCliArgs` is a full escape hatch.** When `options.codexCliArgs` is set, the adapter uses the custom template verbatim (with `{prompt}`, `{model}`, `{session_id}` substitutions) and **skips all adapter-managed flags** — including `--model`, `-c model_reasoning_effort`, `-c approval_policy`, `-c sandbox_mode`, `--skip-git-repo-check`, and the bypass-permission translation. If you use a custom template you are responsible for emitting these flags yourself. Profile-level `options.approvalPolicy`, `options.sandboxMode`, `options.skipGitRepoCheck`, `options.modelReasoningEffort`, and `AGENT_BYPASS_PERMISSIONS` all have **no effect** when a custom template is active. Use this only for integration with non-standard CLI wrappers.
+
 ### Codex (API transport)
 
 ```json
@@ -172,6 +187,38 @@ SDK-specific options:
   "enabled": true
 }
 ```
+
+### Bypass semantics (AGENT_BYPASS_PERMISSIONS)
+
+When `AGENT_BYPASS_PERMISSIONS=1` is set in the environment, the runtime layer flips `execution.bypassPermissions=true`. This is intended for trusted, externally sandboxed environments (Docker containers) where the agent should run unattended.
+
+Each adapter translates this to its native "trust me, just run" mechanism:
+
+| Runtime / transport | Bypass translation                                                            |
+| ------------------- | ----------------------------------------------------------------------------- |
+| Claude SDK          | `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true` |
+| Claude CLI          | `--dangerously-skip-permissions`                                              |
+| Codex SDK           | `approvalPolicy="never"` + `sandboxMode="danger-full-access"` (ThreadOptions) |
+| Codex CLI           | `-c approval_policy="never" -c sandbox_mode="danger-full-access"`             |
+
+Why Codex disables both approval prompts **and** the sandbox: Codex has two orthogonal safety rails (approval policy + OS-level sandbox), while Claude has only one (permission prompts). To match Claude's effective "agent can do anything" behavior, both rails must be cleared. Leaving the Codex sandbox at its default `workspace-write` blocks network access — so `npm install`, `curl`, `git push`, and WebFetch would silently fail.
+
+The Codex CLI uses `--config` (`-c`) overrides instead of the single `--dangerously-bypass-approvals-and-sandbox` flag because the same code path must work for both `codex exec` and `codex exec resume` — the resume subcommand rejects the standalone `--sandbox` flag, while `--config` overrides are accepted on both. The end-state is identical to the atomic flag.
+
+**Opting out for Codex:** if you want narrower safety even in bypass mode, set `options.sandboxMode` or `options.approvalPolicy` explicitly in your profile — explicit profile values override the bypass defaults on both SDK and CLI transports:
+
+```json
+{
+  "runtimeId": "codex",
+  "transport": "cli",
+  "options": {
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never"
+  }
+}
+```
+
+With the example above, even when `AGENT_BYPASS_PERMISSIONS=1` is set, the agent runs with `approval_policy=never` (from the explicit option, which happens to coincide with the bypass default) and `sandbox_mode=workspace-write` (overrides the `danger-full-access` bypass default). You can mix and match — only the axis you set gets overridden.
 
 ### OpenRouter (API)
 
@@ -244,6 +291,12 @@ opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
 For Dockerized deployments, expose the OpenCode server and set profile `baseUrl` to the container/network address.
+
+Permission handling:
+
+- OpenCode permissions live in the server-side `opencode.json` config (per-agent `permission` map resolving to `"allow"` / `"ask"` / `"deny"`). The default `build` agent is effectively permissive (`"*": "allow"` with a few exceptions).
+- When `AGENT_BYPASS_PERMISSIONS=true`, the adapter forces `agent: "build"` in the message body so a user-configured restrictive `default_agent` (e.g. `plan`) cannot block edits.
+- Per-tool `"ask"` rules (e.g. reading `.env*`, writing outside the worktree) are still enforced server-side. If a session hits an `"ask"` rule, OpenCode emits a permission event over `/event` SSE that no-one answers, and the `/session/:id/message` POST will hang until `runTimeoutMs`. For full parity with Claude's `--dangerously-skip-permissions`, set `"permission": "allow"` in `opencode.json`.
 
 ## Capability Gates
 

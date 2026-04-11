@@ -79,7 +79,7 @@ describe("runImplementer rework behavior", () => {
     expect(updatedTask?.implementationLog).toContain("No pending tasks detected in plan");
   });
 
-  it("executes and injects latest human comment when rework is requested", async () => {
+  it("surfaces a loud rework header and injects the latest comment when rework is requested", async () => {
     const db = testDb.current;
     db.insert(tasks)
       .values({
@@ -127,8 +127,16 @@ describe("runImplementer rework behavior", () => {
 
     expect(queryMock).toHaveBeenCalledTimes(1);
     const call = queryMock.mock.calls[0]?.[0] as { prompt: string };
+
+    // Rework header is the very first content of the coordinator prompt
     const firstLine = call.prompt.split("\n")[0] ?? "";
-    expect(firstLine).toBe("Implement the task using the provided plan.");
+    expect(firstLine.startsWith("====")).toBe(true);
+    expect(call.prompt).toContain("REWORK REQUEST — THIS IS THE PRIMARY TASK");
+    expect(call.prompt).toContain("<<<REWORK_COMMENT");
+    expect(call.prompt).toContain("\nREWORK_COMMENT\n");
+    expect(call.prompt).toContain("Rework handling protocol:");
+
+    // Coordinator lead line is still present further down the prompt
     expect(call.prompt).toContain("Implement the task using the provided plan.");
     expect(call.prompt).toContain("HANDOFF_MODE: 1");
     expect(call.prompt).toContain("HANDOFF_TASK_ID: task-2");
@@ -144,6 +152,66 @@ describe("runImplementer rework behavior", () => {
     const updatedTask = db.select().from(tasks).where(eq(tasks.id, "task-2")).get();
     expect(updatedTask?.reworkRequested).toBe(false);
     expect(updatedTask?.implementationLog).toBe("Implementation done");
+  });
+
+  it("does NOT resume a stored session when rework is requested", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({
+        id: "task-rework-no-resume",
+        projectId: "project-1",
+        title: "Task",
+        description: "Desc",
+        status: "implementing",
+        plan: "## Plan\n- [x] Done",
+        reworkRequested: true,
+        sessionId: "old-session-abc",
+      })
+      .run();
+    db.insert(taskComments)
+      .values({
+        id: "c-rework-no-resume",
+        taskId: "task-rework-no-resume",
+        author: "human",
+        message: "please fix the login bug",
+        attachments: "[]",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      })
+      .run();
+
+    await runImplementer("task-rework-no-resume", projectRoot);
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    const call = queryMock.mock.calls[0]?.[0] as {
+      prompt: string;
+      options: { resume?: string };
+    };
+    expect(call.options.resume).toBeUndefined();
+  });
+
+  it("resumes a stored session in the standard (non-rework) implement flow", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({
+        id: "task-normal-resume",
+        projectId: "project-1",
+        title: "Task",
+        description: "Desc",
+        status: "implementing",
+        plan: "Plan:\n- remove old code\n- update docs",
+        reworkRequested: false,
+        sessionId: "session-xyz",
+      })
+      .run();
+
+    await runImplementer("task-normal-resume", projectRoot);
+
+    expect(queryMock).toHaveBeenCalled();
+    const call = queryMock.mock.calls[0]?.[0] as {
+      prompt: string;
+      options: { resume?: string };
+    };
+    expect(call.options.resume).toBe("session-xyz");
   });
 
   it("does not skip when checkbox Task checklist has pending items", async () => {
@@ -280,5 +348,54 @@ describe("runImplementer rework behavior", () => {
 
     const call = queryMock.mock.calls[0]?.[0] as { prompt: string };
     expect(call.prompt).toContain("HANDOFF_SKIP_REVIEW: 1");
+  });
+
+  it("applies rework header and disables resume in skill mode", async () => {
+    const db = testDb.current;
+    db.insert(tasks)
+      .values({
+        id: "task-skill-rework",
+        projectId: "project-1",
+        title: "Task",
+        description: "Desc",
+        status: "implementing",
+        plan: "## Plan\n- [x] Done",
+        reworkRequested: true,
+        useSubagents: false,
+        sessionId: "skill-old-session",
+      })
+      .run();
+    db.insert(taskComments)
+      .values({
+        id: "c-skill-rework",
+        taskId: "task-skill-rework",
+        author: "human",
+        message: "skill-rework-request",
+        attachments: "[]",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      })
+      .run();
+
+    await runImplementer("task-skill-rework", projectRoot);
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    const call = queryMock.mock.calls[0]?.[0] as {
+      prompt: string;
+      options: { resume?: string };
+    };
+
+    // Slash command stays on the first line so Claude Code can expand it
+    const firstLine = call.prompt.split("\n")[0] ?? "";
+    expect(firstLine).toBe("/aif-implement @.ai-factory/PLAN.md");
+
+    // Rework header + comment + protocol are still injected into the body
+    expect(call.prompt).toContain("REWORK REQUEST — THIS IS THE PRIMARY TASK");
+    expect(call.prompt).toContain("<<<REWORK_COMMENT");
+    expect(call.prompt).toContain("message: skill-rework-request");
+    expect(call.prompt).toContain("Rework handling protocol:");
+    expect(call.prompt).toContain("Rework mode: true");
+
+    // Stored session must NOT be resumed for rework, even in skill mode
+    expect(call.options.resume).toBeUndefined();
   });
 });

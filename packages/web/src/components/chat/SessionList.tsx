@@ -9,6 +9,7 @@ import type { ChatSession } from "@aif/shared/browser";
 interface SessionListProps {
   sessions: ChatSession[];
   activeSessionId: string | null;
+  projectName: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
@@ -18,6 +19,7 @@ interface SessionListProps {
 export function SessionList({
   sessions,
   activeSessionId,
+  projectName,
   onSelect,
   onCreate,
   onDelete,
@@ -64,6 +66,9 @@ export function SessionList({
           <Plus className="h-3.5 w-3.5" />
           New Chat
         </Button>
+        <p className="mt-2 text-3xs uppercase tracking-[0.12em] text-muted-foreground">
+          {projectName ? `Current Project: ${projectName}` : "Current Project"}
+        </p>
       </div>
       <div className="flex-1 overflow-y-auto overscroll-contain py-1">
         {sessions.length === 0 && (

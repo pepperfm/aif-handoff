@@ -39,6 +39,54 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 
 const LOCK_RENEWAL_MS = Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) + 5 * 60 * 1000;
 
+const FIRST_ACTIVITY_TIMEOUT_ERROR = "first_activity_timeout";
+const FIRST_ACTIVITY_MAX_RETRIES = 2;
+
+/**
+ * First-activity watchdog: aborts the agent if no runtime activity
+ * arrives within AGENT_FIRST_ACTIVITY_TIMEOUT_MS after "started".
+ * Detects hung agents early (~60s) instead of waiting for the 90-min stale timeout.
+ */
+function createFirstActivityWatchdog(
+  timeoutMs: number,
+  abortController: AbortController | undefined,
+  onStall: () => void,
+): { clear: () => void; markActivity: () => void; didFire: boolean } {
+  if (timeoutMs <= 0) {
+    return { clear: () => {}, markActivity: () => {}, didFire: false };
+  }
+
+  let fired = false;
+  let cleared = false;
+
+  const timer = setTimeout(() => {
+    if (cleared) return;
+    fired = true;
+    onStall();
+    if (abortController && !abortController.signal.aborted) {
+      abortController.abort(new Error(FIRST_ACTIVITY_TIMEOUT_ERROR));
+    }
+  }, timeoutMs);
+
+  return {
+    get didFire() {
+      return fired;
+    },
+    clear() {
+      if (!fired && !cleared) {
+        cleared = true;
+        clearTimeout(timer);
+      }
+    },
+    markActivity() {
+      if (!fired && !cleared) {
+        cleared = true;
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
 let runtimeRegistryPromise: Promise<RuntimeRegistry> | null = null;
 
 export interface SubagentQueryOptions {
@@ -390,6 +438,7 @@ export async function executeSubagentQuery(
 
   let runtimeIdForError = getEnv().AIF_DEFAULT_RUNTIME_ID;
   let adapter: RuntimeAdapter | null = null;
+  let watchdog: ReturnType<typeof createFirstActivityWatchdog> | null = null;
 
   try {
     const context = await resolveExecutionContext(options);
@@ -401,13 +450,6 @@ export async function executeSubagentQuery(
     );
     const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
-
-    const executionIntent = buildExecutionIntent(
-      options,
-      context.systemPromptAppend,
-      context.agentDefinitionName,
-      stderrCollector.onStderr,
-    );
 
     writeQueryAudit({
       timestamp: new Date().toISOString(),
@@ -431,27 +473,143 @@ export async function executeSubagentQuery(
     const registry = await getRuntimeRegistry();
     adapter = registry.resolveRuntime(context.runtimeId);
 
-    const runInput = {
-      runtimeId: context.runtimeId,
-      providerId: context.providerId,
-      profileId: context.profileId,
-      workflowKind: context.workflow.workflowKind,
-      transport: context.transport,
-      prompt: context.prompt,
-      model: context.model ?? undefined,
-      sessionId: existingSessionId,
-      resume: shouldResume,
-      projectRoot,
-      cwd: projectRoot,
-      headers: context.headers,
-      options: context.options,
-      execution: executionIntent,
-    } as const;
+    // First-activity watchdog requires a transport that surfaces incremental
+    // runtime activity in real time. SDK / CLI adapters emit RuntimeEvent
+    // callbacks for streamed text, reasoning, and tool summaries, so any such
+    // event proves the runtime is alive even if the workflow performs no tool
+    // calls. API transport is pure HTTP — no intermediate events — and must
+    // stay disabled.
+    //
+    // CLI gets a 2x buffer over SDK because it carries extra cold-start cost
+    // the SDK path doesn't have: binary spawn (~1-3s) and the initial
+    // system/init exchange with the full tool/MCP catalogue. Without the
+    // buffer, slow first-turn startup on CLI can false-positive the watchdog.
+    const baseFirstActivityTimeoutMs = getEnv().AGENT_FIRST_ACTIVITY_TIMEOUT_MS;
+    const firstActivityTimeoutMs =
+      context.transport === "api"
+        ? 0
+        : context.transport === "cli"
+          ? baseFirstActivityTimeoutMs * 2
+          : baseFirstActivityTimeoutMs;
+    let result: Awaited<ReturnType<RuntimeAdapter["run"]>> | undefined;
 
-    const result =
-      shouldResume && adapter.resume
-        ? await adapter.resume({ ...runInput, sessionId: existingSessionId as string })
-        : await adapter.run(runInput);
+    // Retry loop: if agent stalls (no runtime activity after start), kill and restart
+    for (let attempt = 0; attempt <= FIRST_ACTIVITY_MAX_RETRIES; attempt++) {
+      // Fresh AbortController per attempt — AbortController is single-use
+      const attemptAbort = new AbortController();
+      // Chain to the external abort if provided (stage timeout, shutdown)
+      const externalAbort =
+        options.abortController ?? getActiveStageAbortController(taskId) ?? undefined;
+      if (externalAbort?.signal.aborted) {
+        attemptAbort.abort(externalAbort.signal.reason);
+      } else {
+        externalAbort?.signal.addEventListener(
+          "abort",
+          () => attemptAbort.abort(externalAbort.signal.reason),
+          { once: true },
+        );
+      }
+
+      const executionIntent = buildExecutionIntent(
+        options,
+        context.systemPromptAppend,
+        context.agentDefinitionName,
+        stderrCollector.onStderr,
+      );
+      // Override the abort controller with our per-attempt one
+      executionIntent.abortController = attemptAbort;
+      // API transport is pure HTTP — no incremental stream — so the
+      // start-timeout watchdog has nothing to observe and must stay off.
+      // SDK streams in-process and CLI now streams JSONL events (system/init
+      // arrives in the first few hundred ms), so both tolerate start timeout.
+      if (context.transport === "api") {
+        executionIntent.startTimeoutMs = 0;
+      }
+
+      // Set up first-activity watchdog for this attempt
+      watchdog = createFirstActivityWatchdog(firstActivityTimeoutMs, attemptAbort, () => {
+        const timeoutSec = Math.round(firstActivityTimeoutMs / 1000);
+        logActivity(
+          taskId,
+          "Agent",
+          `${agentName} stalled — no runtime activity within ${timeoutSec}s after start (attempt ${attempt + 1}/${FIRST_ACTIVITY_MAX_RETRIES + 1}), restarting`,
+        );
+        log.warn(
+          { taskId, agentName, firstActivityTimeoutMs, attempt: attempt + 1 },
+          "First-activity watchdog triggered: killing and restarting agent",
+        );
+      });
+
+      // Install an onEvent bridge even when the caller did not request
+      // streamed events directly: the watchdog needs a callback to observe
+      // runtime activity for tool-less workflows such as checklist sync.
+      const wd = watchdog!;
+      const originalOnEvent = executionIntent.onEvent ?? (() => undefined);
+      const originalOnToolUse = executionIntent.onToolUse;
+      const originalOnSubagentStart = executionIntent.onSubagentStart;
+      executionIntent.onEvent = (event) => {
+        wd.markActivity();
+        originalOnEvent(event);
+      };
+      if (originalOnToolUse) {
+        executionIntent.onToolUse = (toolName, detail) => {
+          wd.markActivity();
+          originalOnToolUse(toolName, detail);
+        };
+      }
+      if (originalOnSubagentStart) {
+        executionIntent.onSubagentStart = (name, id) => {
+          wd.markActivity();
+          originalOnSubagentStart(name, id);
+        };
+      }
+
+      const runInput = {
+        runtimeId: context.runtimeId,
+        providerId: context.providerId,
+        profileId: context.profileId,
+        workflowKind: context.workflow.workflowKind,
+        transport: context.transport,
+        prompt: context.prompt,
+        model: context.model ?? undefined,
+        sessionId: existingSessionId,
+        resume: shouldResume,
+        projectRoot,
+        cwd: projectRoot,
+        headers: context.headers,
+        options: context.options,
+        execution: executionIntent,
+      } as const;
+
+      try {
+        result =
+          shouldResume && adapter.resume
+            ? await adapter.resume({ ...runInput, sessionId: existingSessionId as string })
+            : await adapter.run(runInput);
+        // Success — break out of retry loop
+        watchdog.clear();
+        break;
+      } catch (err) {
+        const stalledByWatchdog = watchdog.didFire;
+        watchdog.clear();
+        if (stalledByWatchdog && attempt < FIRST_ACTIVITY_MAX_RETRIES) {
+          // Agent stalled — kill and retry
+          log.info(
+            { taskId, agentName, attempt: attempt + 1, maxRetries: FIRST_ACTIVITY_MAX_RETRIES },
+            "Restarting agent after first-activity stall",
+          );
+          continue;
+        }
+        // Not a stall or retries exhausted — re-throw
+        throw err;
+      }
+    }
+
+    if (!result) {
+      throw new Error(
+        `${agentName}: all ${FIRST_ACTIVITY_MAX_RETRIES + 1} attempts stalled without tool activity`,
+      );
+    }
 
     const runtimeSessionId = getResultSessionId(result, context.capabilities);
     if (runtimeSessionId && context.canResume) {
@@ -521,6 +679,11 @@ export async function executeSubagentQuery(
     );
     throw new Error(reason, { cause: error });
   } finally {
+    try {
+      watchdog?.clear();
+    } catch {
+      // safety guard
+    }
     try {
       clearInterval(heartbeatTimer);
     } catch {

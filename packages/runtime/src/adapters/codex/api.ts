@@ -265,8 +265,19 @@ function normalizeUsage(usage: unknown): RuntimeUsage | null {
 
 function buildRunTimeoutSignal(input: RuntimeRunInput): AbortSignal | undefined {
   const runMs = input.execution?.runTimeoutMs;
-  if (typeof runMs !== "number" || !Number.isFinite(runMs) || runMs <= 0) return undefined;
-  return AbortSignal.timeout(Math.floor(runMs));
+  const externalAbort = input.execution?.abortController;
+
+  const signals: AbortSignal[] = [];
+  if (typeof runMs === "number" && Number.isFinite(runMs) && runMs > 0) {
+    signals.push(AbortSignal.timeout(Math.floor(runMs)));
+  }
+  if (externalAbort) {
+    signals.push(externalAbort.signal);
+  }
+
+  if (signals.length === 0) return undefined;
+  if (signals.length === 1) return signals[0];
+  return AbortSignal.any(signals);
 }
 
 function isAbortTimeoutError(error: unknown): boolean {

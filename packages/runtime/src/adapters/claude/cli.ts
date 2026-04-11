@@ -7,7 +7,8 @@ import {
   sleepMs,
   withProcessTimeouts,
 } from "../../timeouts.js";
-import { classifyClaudeRuntimeError } from "./errors.js";
+import { classifyClaudeResultSubtype, classifyClaudeRuntimeError } from "./errors.js";
+import { normalizeClaudeEffort } from "./options.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -135,10 +136,19 @@ function resolveTimeoutMs(input: RuntimeRunInput): number {
 /**
  * Build CLI args for the `claude` binary.
  *
- * Agent mode:  `claude --agent <name> --output-format json -p "<prompt>"`
- * Direct mode: `claude --output-format json -p "<prompt>"`
+ * Agent mode:  `claude --agent <name> --output-format stream-json --verbose -p`
+ * Direct mode: `claude --output-format stream-json --verbose -p`
  *
- * With --yes to accept all permission prompts (non-interactive).
+ * The prompt itself is NOT passed on the command line — it is written to the
+ * child's stdin in `runCliAttempt`. This keeps the prompt off argv so we do
+ * not hit ARG_MAX / cmd.exe command-line limits on large prompts (rework
+ * headers, full plans, task attachments can easily reach 100+ KB).
+ *
+ * stream-json is used instead of json so the CLI emits JSONL events as they
+ * happen — text chunks, tool_use, session init — giving the runtime a live
+ * feed of Agent Activity (onEvent/onToolUse callbacks) rather than a single
+ * buffered blob at exit. --verbose is a hard requirement for the CLI to
+ * actually stream intermediate events in stream-json mode.
  */
 function buildCliArgs(input: RuntimeRunInput): string[] {
   const execution = input.execution;
@@ -151,12 +161,23 @@ function buildCliArgs(input: RuntimeRunInput): string[] {
     args.push("--agent", agentName);
   }
 
-  // Output format
-  args.push("--output-format", "json");
+  // Streaming JSONL output (required to surface Agent Activity in real time)
+  args.push("--output-format", "stream-json", "--verbose");
+
+  // Opt-in token-level deltas (only works with --print + stream-json)
+  if (execution?.includePartialMessages) {
+    args.push("--include-partial-messages");
+  }
 
   // Model override
   if (input.model) {
     args.push("--model", input.model);
+  }
+
+  // Effort level (low, medium, high, max)
+  const effort = normalizeClaudeEffort(options.effort);
+  if (effort) {
+    args.push("--effort", effort);
   }
 
   // Max turns
@@ -182,20 +203,42 @@ function buildCliArgs(input: RuntimeRunInput): string[] {
     args.push("--permission-mode", "acceptEdits");
   }
 
-  // Prompt
-  args.push("-p", input.prompt);
+  // Non-interactive print mode — prompt itself is piped through stdin below.
+  args.push("-p");
 
   return args;
 }
 
-interface ClaudeJsonOutput {
-  result?: string;
+// ---------------------------------------------------------------------------
+// stream-json line processor
+// ---------------------------------------------------------------------------
+
+interface StreamJsonContentItem {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  thinking?: string;
+}
+
+interface StreamJsonMessage {
+  type?: string;
+  subtype?: string;
   session_id?: string;
   is_error?: boolean;
+  result?: string;
+  total_cost_usd?: number;
   cost_usd?: number;
   duration_ms?: number;
   duration_api_ms?: number;
   num_turns?: number;
+  message?: {
+    content?: StreamJsonContentItem[];
+  };
+  event?: {
+    type?: string;
+    delta?: { type?: string; text?: string };
+  };
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -205,64 +248,226 @@ interface ClaudeJsonOutput {
   };
 }
 
-function parseCliResult(stdout: string, fallbackSessionId: string | null): RuntimeRunResult {
-  const trimmed = stdout.trim();
-  if (!trimmed) {
-    return { outputText: "", sessionId: fallbackSessionId };
+interface ClaudeCliStreamState {
+  sessionId: string | null;
+  outputText: string;
+  assistantText: string;
+  usage: RuntimeUsage | null;
+  events: RuntimeEvent[];
+  terminalErrorSubtype: string | null;
+  terminalErrorDetail: string | null;
+  plainTextFallback: string;
+}
+
+function createCliStreamState(fallbackSessionId: string | null): ClaudeCliStreamState {
+  return {
+    sessionId: fallbackSessionId,
+    outputText: "",
+    assistantText: "",
+    usage: null,
+    events: [],
+    terminalErrorSubtype: null,
+    terminalErrorDetail: null,
+    plainTextFallback: "",
+  };
+}
+
+function summarizeToolInput(input: unknown): string {
+  if (input == null) return "";
+  if (typeof input === "string") {
+    return input.length > 80 ? `${input.slice(0, 77)}...` : input;
+  }
+  try {
+    const json = JSON.stringify(input);
+    if (json.length <= 100) return json;
+    return `${json.slice(0, 97)}...`;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeStreamJsonUsage(message: StreamJsonMessage): RuntimeUsage | null {
+  const usage = message.usage;
+  if (!usage) return null;
+  const rawInput = usage.input_tokens ?? 0;
+  const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const inputTokens = rawInput + cacheCreation + cacheRead;
+  const outputTokens = usage.output_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
+  const costUsdRaw = message.total_cost_usd ?? message.cost_usd;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    costUsd: typeof costUsdRaw === "number" ? costUsdRaw : undefined,
+  };
+}
+
+function emitEvent(
+  state: ClaudeCliStreamState,
+  execution: RuntimeRunInput["execution"],
+  event: RuntimeEvent,
+): void {
+  state.events.push(event);
+  execution?.onEvent?.(event);
+}
+
+function processStreamJsonLine(
+  line: string,
+  state: ClaudeCliStreamState,
+  execution: RuntimeRunInput["execution"],
+): void {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+
+  let message: StreamJsonMessage;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      state.plainTextFallback += (state.plainTextFallback ? "\n" : "") + trimmed;
+      return;
+    }
+    message = parsed as StreamJsonMessage;
+  } catch {
+    state.plainTextFallback += (state.plainTextFallback ? "\n" : "") + trimmed;
+    return;
   }
 
-  try {
-    const parsed = JSON.parse(trimmed) as ClaudeJsonOutput;
+  const nowIso = new Date().toISOString();
 
-    if (parsed.is_error) {
-      throw classifyClaudeRuntimeError(parsed.result ?? "Claude CLI returned an error");
+  if (message.type === "system" && message.subtype === "init") {
+    if (typeof message.session_id === "string" && message.session_id.length > 0) {
+      state.sessionId = message.session_id;
     }
+    emitEvent(state, execution, {
+      type: "system:init",
+      timestamp: nowIso,
+      level: "debug",
+      message: "Runtime session initialized",
+      data: { sessionId: state.sessionId },
+    });
+    return;
+  }
 
-    let usage: RuntimeUsage | null = null;
-    if (parsed.usage) {
-      const inputTokens =
-        (parsed.usage.input_tokens ?? 0) +
-        (parsed.usage.cache_creation_input_tokens ?? 0) +
-        (parsed.usage.cache_read_input_tokens ?? 0);
-      const outputTokens = parsed.usage.output_tokens ?? 0;
-      usage = {
-        inputTokens,
-        outputTokens,
-        totalTokens: parsed.usage.total_tokens ?? inputTokens + outputTokens,
-        costUsd: parsed.cost_usd,
-      };
+  if (message.type === "assistant") {
+    if (typeof message.session_id === "string" && !state.sessionId) {
+      state.sessionId = message.session_id;
     }
+    const content = message.message?.content;
+    // When --include-partial-messages is on, Claude emits BOTH token-level
+    // deltas (stream_event.content_block_delta.text_delta) AND the complete
+    // assistant content block once it finishes. Emitting stream:text from
+    // both sources would deliver the full text twice to callbacks that
+    // concatenate (e.g. chat:token → fullAssistantResponse in the chat
+    // route), so in partial-messages mode we only accumulate the full text
+    // for fallback and rely on deltas for the live event stream.
+    const partialMode = Boolean(execution?.includePartialMessages);
+    if (Array.isArray(content)) {
+      for (const item of content) {
+        if (!item || typeof item !== "object") continue;
+        if (item.type === "text" && typeof item.text === "string") {
+          state.assistantText += item.text;
+          if (!partialMode) {
+            emitEvent(state, execution, {
+              type: "stream:text",
+              timestamp: nowIso,
+              level: "debug",
+              message: item.text,
+              data: { text: item.text },
+            });
+          }
+        } else if (item.type === "tool_use" && typeof item.name === "string") {
+          const summary = summarizeToolInput(item.input);
+          const detailSuffix = summary ? ` ${summary}` : "";
+          emitEvent(state, execution, {
+            type: "tool:use",
+            timestamp: nowIso,
+            level: "info",
+            message: `${item.name}${detailSuffix}`,
+            data: { name: item.name, input: item.input },
+          });
+          execution?.onToolUse?.(item.name, detailSuffix);
+        }
+      }
+    }
+    return;
+  }
 
-    const events: RuntimeEvent[] = [];
-    if (parsed.result) {
-      events.push({
-        type: "result:success",
-        timestamp: new Date().toISOString(),
-        level: "info",
-        message: "CLI execution completed",
-        data: {
-          numTurns: parsed.num_turns,
-          durationMs: parsed.duration_ms,
-        },
+  if (message.type === "stream_event") {
+    const delta = message.event?.delta;
+    if (
+      message.event?.type === "content_block_delta" &&
+      delta?.type === "text_delta" &&
+      typeof delta.text === "string"
+    ) {
+      state.outputText += delta.text;
+      emitEvent(state, execution, {
+        type: "stream:text",
+        timestamp: nowIso,
+        level: "debug",
+        message: delta.text,
+        data: { text: delta.text },
       });
     }
-
-    return {
-      outputText: parsed.result ?? "",
-      sessionId: parsed.session_id ?? fallbackSessionId,
-      usage,
-      events,
-    };
-  } catch (error) {
-    if (error instanceof Error && error.name === "ClaudeRuntimeAdapterError") throw error;
-
-    // Not valid JSON — treat the whole output as plain text
-    return {
-      outputText: trimmed,
-      sessionId: fallbackSessionId,
-      raw: trimmed,
-    };
+    return;
   }
+
+  if (message.type === "result") {
+    state.usage = normalizeStreamJsonUsage(message);
+    if (typeof message.session_id === "string") {
+      state.sessionId = message.session_id;
+    }
+    const directResult = typeof message.result === "string" ? message.result : "";
+    const subtype = message.subtype ?? "unknown";
+    const isError = subtype !== "success" || message.is_error === true;
+
+    if (isError) {
+      state.terminalErrorSubtype = subtype;
+      state.terminalErrorDetail = directResult || null;
+      emitEvent(state, execution, {
+        type: `result:${subtype}`,
+        timestamp: nowIso,
+        level: "error",
+        message: `Query ended with subtype ${subtype}`,
+        data: { subtype },
+      });
+      return;
+    }
+
+    // Success — finalize outputText. Prefer partial-message deltas, then
+    // accumulated assistant text, then the final `result` field.
+    if (!state.outputText) {
+      state.outputText = state.assistantText || directResult;
+    }
+    emitEvent(state, execution, {
+      type: "result:success",
+      timestamp: nowIso,
+      level: "info",
+      message: "CLI execution completed",
+      data: {
+        numTurns: message.num_turns,
+        durationMs: message.duration_ms,
+      },
+    });
+    return;
+  }
+
+  // Other message types (rate_limit_event, etc.) — not surfaced.
+}
+
+function finalizeCliResult(
+  state: ClaudeCliStreamState,
+  fallbackSessionId: string | null,
+): RuntimeRunResult {
+  const outputText =
+    state.outputText || state.assistantText || state.plainTextFallback.trim() || "";
+  return {
+    outputText,
+    sessionId: state.sessionId ?? fallbackSessionId,
+    usage: state.usage,
+    events: state.events,
+  };
 }
 
 function spawnCliProcess(
@@ -293,11 +498,30 @@ function runCliAttempt(
     runTimeoutMs: execution?.runTimeoutMs ?? resolveTimeoutMs(input),
   });
 
-  let stdout = "";
+  const state = createCliStreamState(input.sessionId ?? null);
+  let stdoutBuffer = "";
   let stderr = "";
 
+  const flushCompleteLines = (): void => {
+    let newlineIdx = stdoutBuffer.indexOf("\n");
+    while (newlineIdx !== -1) {
+      const line = stdoutBuffer.slice(0, newlineIdx);
+      stdoutBuffer = stdoutBuffer.slice(newlineIdx + 1);
+      processStreamJsonLine(line, state, execution);
+      newlineIdx = stdoutBuffer.indexOf("\n");
+    }
+  };
+
   child.stdout!.on("data", (chunk: Buffer | string) => {
-    stdout += String(chunk);
+    stdoutBuffer += String(chunk);
+    try {
+      flushCompleteLines();
+    } catch (err) {
+      logger?.error?.(
+        { runtimeId: input.runtimeId, err },
+        "Claude CLI stream-json processing error",
+      );
+    }
   });
 
   child.stderr!.on("data", (chunk: Buffer | string) => {
@@ -306,8 +530,13 @@ function runCliAttempt(
     execution?.onStderr?.(text);
   });
 
-  // Prompt is passed via -p flag, close stdin immediately to prevent
-  // "no stdin data received" warnings from the CLI.
+  // Prompt is streamed via stdin so it never lands on argv (ARG_MAX /
+  // cmd.exe command-line limits would clip large rework/plan prompts).
+  // Swallow EPIPE — the child may exit before the full prompt is flushed.
+  child.stdin!.on("error", () => {
+    /* ignore broken-pipe */
+  });
+  child.stdin!.write(input.prompt);
   child.stdin!.end();
 
   // If abort is requested, kill the child
@@ -330,6 +559,16 @@ function runCliAttempt(
     child.on("close", async (code) => {
       timeouts.cleanup();
 
+      // Flush any trailing buffer content as a final line.
+      if (stdoutBuffer.length > 0) {
+        try {
+          processStreamJsonLine(stdoutBuffer, state, execution);
+        } catch {
+          /* ignore tail processing errors */
+        }
+        stdoutBuffer = "";
+      }
+
       const startTimedOut = await timeouts.startTimedOut;
 
       if (startTimedOut) {
@@ -349,20 +588,20 @@ function runCliAttempt(
       }
 
       if (code !== 0) {
-        const message = `Claude CLI exited with code ${code}: ${stderr || stdout || "unknown error"}`;
+        const message = `Claude CLI exited with code ${code}: ${stderr || state.outputText || state.plainTextFallback || "unknown error"}`;
         reject(classifyClaudeRuntimeError(message));
         return;
       }
 
-      try {
-        resolve({ result: parseCliResult(stdout, input.sessionId ?? null), startTimedOut: false });
-      } catch (error) {
-        reject(
-          error instanceof Error && error.name === "ClaudeRuntimeAdapterError"
-            ? error
-            : classifyClaudeRuntimeError(error),
-        );
+      if (state.terminalErrorSubtype) {
+        reject(classifyClaudeResultSubtype(state.terminalErrorSubtype, state.terminalErrorDetail));
+        return;
       }
+
+      resolve({
+        result: finalizeCliResult(state, input.sessionId ?? null),
+        startTimedOut: false,
+      });
     });
   });
 }

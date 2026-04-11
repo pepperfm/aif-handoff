@@ -26,9 +26,11 @@ Configured in `.mcp.json` at the project root (already included in the repositor
       "args": ["tsx", "packages/mcp/src/index.ts"],
       "cwd": "/absolute/path/to/aif-handoff",
       "env": {
+        "MCP_TRANSPORT": "stdio",
         "DATABASE_URL": "/absolute/path/to/aif-handoff/data/aif.sqlite",
         "PROJECTS_DIR": "/absolute/path/to/aif-handoff/.projects",
-        "LOG_LEVEL": "info"
+        "LOG_LEVEL": "info",
+        "LOG_DESTINATION": "stderr"
       }
     }
   }
@@ -36,12 +38,16 @@ Configured in `.mcp.json` at the project root (already included in the repositor
 ```
 
 > **Important:** Use absolute paths for `cwd`, `DATABASE_URL`, and `PROJECTS_DIR`. Relative paths won't resolve correctly because the MCP process cwd is not guaranteed to be the project root.
+>
+> **Important for Codex stdio:** set `LOG_DESTINATION=stderr`. MCP over stdio reserves `stdout` for protocol messages; regular app logs on `stdout` will break the handshake.
+>
+> **Security note:** values placed in MCP `env` are stored in plain text in local client config files such as `~/.codex/config.toml`, so do not put long-lived secrets there unless you accept that on-disk exposure.
 
 Claude Code auto-discovers the Handoff MCP server from `.mcp.json` — no build step required.
 
 #### HTTP — Docker / remote
 
-When running in Docker, the MCP server uses Streamable HTTP transport. Set `MCP_TRANSPORT=http` and the server listens on `MCP_PORT` (default `3100`):
+When running in Docker, or in local development with `MCP_PORT` set, the MCP server uses Streamable HTTP transport and listens on `MCP_PORT` (default `3100`):
 
 ```json
 {
@@ -54,6 +60,8 @@ When running in Docker, the MCP server uses Streamable HTTP transport. Set `MCP_
 ```
 
 The HTTP mode also exposes a `/health` endpoint for Docker healthchecks.
+
+When the web settings UI calls `POST /settings/mcp/install`, the API installs this HTTP URL form automatically whenever `MCP_PORT` is set. If `MCP_PORT` is not set, it falls back to the local `stdio`/`npx tsx packages/mcp/src/index.ts` entry.
 
 ### Environment Variables
 

@@ -229,15 +229,10 @@ function extractTextFromParts(parts: unknown[]): string {
   const texts: string[] = [];
   for (const part of parts) {
     const record = asRecord(part);
-    const text = readString(record.text);
-    if (text) {
-      texts.push(text);
-      continue;
-    }
-    const content = readString(record.content);
-    if (content) {
-      texts.push(content);
-    }
+    const type = readString(record.type);
+    if (type && type !== "text") continue;
+    const text = readString(record.text) ?? readString(record.content);
+    if (text) texts.push(text);
   }
   return texts.join("\n\n").trim();
 }
@@ -410,6 +405,17 @@ export async function runOpenCodeApi(
   const effort = normalizeOpenCodeEffort(options.reasoningEffort);
   if (effort) {
     body.reasoningEffort = effort;
+  }
+
+  // bypassPermissions parity: OpenCode resolves `agent` to the user's
+  // configured default (or the built-in `build` agent). When the caller
+  // requests a permission bypass, force `build` so a user-configured
+  // restrictive default (e.g. `plan`) cannot block edits. Per-tool
+  // "ask" permissions (.env*, external_directory, doom_loop) are still
+  // enforced server-side — true parity would require responding to
+  // /session/:id/permissions/:permissionID events over SSE.
+  if (input.execution?.bypassPermissions) {
+    body.agent = "build";
   }
 
   const messagePayload = await requestJson<{ info?: unknown; parts?: unknown[] }>(input, {

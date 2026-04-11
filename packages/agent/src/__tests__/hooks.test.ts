@@ -65,6 +65,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     AGENT_CHAT_MAX_TURNS: 50,
     AGENT_MAX_REVIEW_ITERATIONS: 3,
     AGENT_USE_SUBAGENTS: true,
+    AGENT_FIRST_ACTIVITY_TIMEOUT_MS: 60_000,
     ...overrides,
   };
 }

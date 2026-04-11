@@ -17,7 +17,6 @@ import {
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
-import { getCodexExecutionHooks } from "./codexExecutionHooks.js";
 import {
   findProjectById,
   findRuntimeProfileById,
@@ -270,11 +269,13 @@ export async function runApiRuntimeOneShot(input: {
     runtimeId: context.resolvedProfile.runtimeId,
     providerId: context.resolvedProfile.providerId,
     profileId: context.resolvedProfile.profileId,
+    transport: context.resolvedProfile.transport,
     workflowKind: workflow.workflowKind,
     prompt: input.prompt,
     model: context.resolvedProfile.model ?? undefined,
     projectRoot: input.projectRoot,
     cwd: input.projectRoot,
+    headers: context.resolvedProfile.headers,
     options: {
       ...context.resolvedProfile.options,
       ...(context.resolvedProfile.baseUrl ? { baseUrl: context.resolvedProfile.baseUrl } : {}),
@@ -283,20 +284,19 @@ export async function runApiRuntimeOneShot(input: {
         : {}),
     },
     execution: {
-      startTimeoutMs: env.API_RUNTIME_START_TIMEOUT_MS,
+      // CLI/API transports produce output only after the full run completes,
+      // so start timeout is meaningless — disable it and rely on run timeout only.
+      startTimeoutMs:
+        context.resolvedProfile.transport === "sdk" ? env.API_RUNTIME_START_TIMEOUT_MS : 0,
       runTimeoutMs: env.API_RUNTIME_RUN_TIMEOUT_MS,
       includePartialMessages: input.includePartialMessages ?? false,
       maxTurns: input.maxTurns,
       systemPromptAppend: input.systemPromptAppend,
+      bypassPermissions,
       environment: input.taskId
         ? { HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.taskId }
         : { HANDOFF_MODE: "1" },
       hooks: {
-        ...getCodexExecutionHooks({
-          runtimeId: context.resolvedProfile.runtimeId,
-          transport: context.resolvedProfile.transport,
-          bypassPermissions,
-        }),
         permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
         allowDangerouslySkipPermissions: bypassPermissions,
         _trustToken: RUNTIME_TRUST_TOKEN,

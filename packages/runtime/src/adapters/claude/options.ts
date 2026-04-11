@@ -250,8 +250,8 @@ function mergeSystemPromptAppend(
   return values.join("\n\n");
 }
 
-const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "max"] as const;
-type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
+export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "max"] as const;
+export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
 const CLAUDE_NUMERIC_EFFORT_MAP: Record<number, ClaudeEffortLevel> = {
   1: "low",
   2: "medium",
@@ -259,7 +259,7 @@ const CLAUDE_NUMERIC_EFFORT_MAP: Record<number, ClaudeEffortLevel> = {
   4: "max",
 };
 
-function normalizeClaudeEffort(rawEffort: unknown): ClaudeEffortLevel | null {
+export function normalizeClaudeEffort(rawEffort: unknown): ClaudeEffortLevel | null {
   if (typeof rawEffort === "string") {
     const normalized = rawEffort.trim().toLowerCase();
     return CLAUDE_EFFORT_LEVELS.includes(normalized as ClaudeEffortLevel)

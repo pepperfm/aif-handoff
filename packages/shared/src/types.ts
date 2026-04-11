@@ -405,7 +405,7 @@ export interface ChatAttachment {
 export interface ChatRequest {
   projectId: string;
   message: string;
-  clientId: string;
+  clientId?: string;
   conversationId?: string;
   sessionId?: string;
   explore?: boolean;

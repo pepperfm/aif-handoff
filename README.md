@@ -17,7 +17,7 @@ Use the runtime that fits your stack today, then switch per project/task without
 - **OpenRouter (`openrouter`)** — API transport
 - **OpenCode (`opencode`)** — API transport
 
-> **⚠️ Warning:** Anthropic prohibits using Claude Max / Pro subscriptions outside of the official Claude Code CLI. The SDK transport for Claude calls the Agent SDK directly, which may violate these terms. Use it at your own risk — consider API transport with an `ANTHROPIC_API_KEY` for production use.
+> **⚠️ Warning:** Anthropic prohibits using Claude Max / Pro subscriptions outside of the official Claude Code CLI. The SDK transport for Claude calls the Agent SDK directly, which may violate these terms. If you're worried about your subscription getting blocked, use the **CLI transport** — it runs through the official Claude Code CLI and is safe to use on a Max / Pro subscription. Use the SDK transport at your own risk, or switch to the API transport with an `ANTHROPIC_API_KEY` for production use.
 
 Need something custom? Add your own runtime adapter module and load it at startup via `AIF_RUNTIME_MODULES` (comma-separated module specifiers). No fork required.
 
@@ -45,6 +45,8 @@ npm run init
 npm run dev
 ```
 
+Set `MCP_PORT` in your shell or root `.env` before `npm run dev` if you also want the MCP HTTP server in local development.
+
 ### With Docker
 
 ```bash
@@ -53,13 +55,14 @@ cd aif-handoff
 docker compose up --build
 ```
 
-Both options start three services:
+Development starts three services by default. If `MCP_PORT` is set, it starts a fourth service for MCP over HTTP. Docker starts all four services.
 
-| Service   | URL                     | Description                                  |
-| --------- | ----------------------- | -------------------------------------------- |
-| **API**   | `http://localhost:3009` | Hono REST + WebSocket server                 |
-| **Web**   | `http://localhost:5180` | React Kanban UI                              |
-| **Agent** | _(background)_          | Event-driven + polling, dispatches subagents |
+| Service   | URL                               | Description                                  |
+| --------- | --------------------------------- | -------------------------------------------- |
+| **API**   | `http://localhost:3009`           | Hono REST + WebSocket server                 |
+| **Web**   | `http://localhost:5180`           | React Kanban UI                              |
+| **Agent** | _(background)_                    | Event-driven + polling, dispatches subagents |
+| **MCP**   | `http://localhost:<MCP_PORT>/mcp` | Optional local MCP HTTP endpoint             |
 
 The agent coordinator reacts to task events via WebSocket in near real-time and falls back to 30-second polling. Activity logging can be switched to batch mode (`ACTIVITY_LOG_MODE=batch`) to reduce DB write amplification. See [Configuration](docs/configuration.md) for all tuning options.
 
@@ -161,7 +164,7 @@ The project includes full Docker support (Angie reverse proxy + Node services).
 docker compose up --build
 ```
 
-Web UI at `localhost:5180`, API at `localhost:3009`.
+Web UI at `localhost:5180`, API at `localhost:3009`, MCP at `localhost:${MCP_PORT:-3100}`.
 
 ### Production
 
@@ -178,6 +181,7 @@ Only ports 80/443 are exposed. API is bound to localhost only. Includes security
 | `ANTHROPIC_API_KEY` | —            | API key (or use `claude login`)        |
 | `DOMAIN`            | `localhost`  | Domain for SSL certificate (ACME)      |
 | `PORT`              | `3009`       | Host port for API                      |
+| `MCP_PORT`          | `3100`       | Host port for MCP HTTP server          |
 | `WEB_PORT`          | `5180`       | Host port for Web UI (dev)             |
 | `WEB_HOST`          | `localhost`  | Web UI dev server host (Vite)          |
 | `HTTP_PORT`         | `80`         | Host port for Web UI (production)      |

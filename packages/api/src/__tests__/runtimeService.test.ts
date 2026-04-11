@@ -382,7 +382,9 @@ describe("runtime service", () => {
     expect(adapter.run).toHaveBeenCalledWith(
       expect.objectContaining({
         runtimeId: "claude",
+        transport: "sdk",
         workflowKind: "oneshot",
+        headers: {},
         options: expect.objectContaining({
           mode: "safe",
           baseUrl: "https://example.test",
@@ -393,6 +395,7 @@ describe("runtime service", () => {
           runTimeoutMs: 120_000,
           includePartialMessages: true,
           maxTurns: 4,
+          bypassPermissions: false,
           environment: {
             HANDOFF_MODE: "1",
             HANDOFF_TASK_ID: "task-77",
@@ -403,6 +406,32 @@ describe("runtime service", () => {
             _trustToken: Symbol.for("aif.runtime.trust"),
           }),
         }),
+      }),
+    );
+  });
+
+  it("passes transport and headers from resolved profile to adapter.run()", async () => {
+    const runtimeService = await loadRuntimeService();
+    const adapter = createAdapter();
+    mockRegistryResolveRuntime.mockReturnValue(adapter);
+    mockResolveRuntimeProfile.mockReturnValue(
+      createResolvedProfile({
+        transport: "cli",
+        headers: { "X-Custom": "value" },
+      }),
+    );
+
+    await runtimeService.runApiRuntimeOneShot({
+      projectId: "proj-1",
+      projectRoot: "/tmp/project",
+      prompt: "generate roadmap",
+      workflowKind: "roadmap-generate",
+    });
+
+    expect(adapter.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: "cli",
+        headers: { "X-Custom": "value" },
       }),
     );
   });
@@ -435,12 +464,34 @@ describe("runtime service", () => {
           runTimeoutMs: 240_000,
           includePartialMessages: false,
           systemPromptAppend: "extra",
+          bypassPermissions: true,
           environment: { HANDOFF_MODE: "1" },
           hooks: expect.objectContaining({
             permissionMode: "bypassPermissions",
             allowDangerouslySkipPermissions: true,
             _trustToken: Symbol.for("aif.runtime.trust"),
           }),
+        }),
+      }),
+    );
+  });
+
+  it("passes execution.bypassPermissions=false to adapter.run when AGENT_BYPASS_PERMISSIONS is unset", async () => {
+    const runtimeService = await loadRuntimeService();
+    const adapter = createAdapter();
+    mockRegistryResolveRuntime.mockReturnValue(adapter);
+
+    await runtimeService.runApiRuntimeOneShot({
+      projectId: "proj-1",
+      projectRoot: "/tmp/project",
+      prompt: "do work",
+      workflowKind: "commit",
+    });
+
+    expect(adapter.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        execution: expect.objectContaining({
+          bypassPermissions: false,
         }),
       }),
     );

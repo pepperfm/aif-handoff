@@ -135,4 +135,35 @@ describe("useChatSessions", () => {
     expect(mockListChatSessions).not.toHaveBeenCalled();
     expect(result.current.sessions).toEqual([]);
   });
+
+  it("clears the active session when the current project changes", async () => {
+    mockListChatSessions.mockImplementation((projectId: string) =>
+      Promise.resolve(
+        projectId === "proj-1"
+          ? [{ id: "s1", projectId: "proj-1", title: "Chat 1", updatedAt: "2026-01-01" }]
+          : [{ id: "s2", projectId: "proj-2", title: "Chat 2", updatedAt: "2026-01-02" }],
+      ),
+    );
+
+    const { result, rerender } = renderHook(({ projectId }) => useChatSessions(projectId), {
+      initialProps: { projectId: "proj-1" as string | null },
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessions[0]?.id).toBe("s1");
+    });
+
+    act(() => {
+      result.current.setActiveSessionId("s1");
+    });
+    expect(result.current.activeSessionId).toBe("s1");
+
+    rerender({ projectId: "proj-2" });
+
+    await waitFor(() => {
+      expect(result.current.sessions[0]?.id).toBe("s2");
+    });
+    expect(result.current.activeSessionId).toBe("s2");
+  });
 });

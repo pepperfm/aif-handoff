@@ -34,4 +34,15 @@ describe("codex error classification", () => {
     expect(classified.adapterCode).toBe("CODEX_RATE_LIMIT");
     expect(classified.category).toBe("rate_limit");
   });
+
+  it.each([
+    "You've hit your limit, resets later today",
+    "Monthly limit reached",
+    "Limit exceeded for this model",
+    "Out of credits",
+  ])("classifies provider limit phrasings as rate limit: %s", (msg) => {
+    const classified = classifyCodexRuntimeError(msg);
+    expect(classified.adapterCode).toBe("CODEX_RATE_LIMIT");
+    expect(classified.category).toBe("rate_limit");
+  });
 });

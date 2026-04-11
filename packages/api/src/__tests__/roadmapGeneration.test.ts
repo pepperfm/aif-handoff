@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { projects } from "@aif/shared";
+import { generatePlanPath, projects } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -158,9 +158,9 @@ describe("roadmapGeneration", () => {
       expect(existsSync(result.roadmapPath)).toBe(true);
       expect(readFileSync(result.roadmapPath, "utf8")).toContain("# Project Roadmap");
 
-      // Prompt must include /aif-roadmap skill prefix
+      // Prompt must include roadmap generation instructions
       const callArgs = mockRunApiRuntimeOneShot.mock.calls[0][0];
-      expect(callArgs.prompt).toMatch(/^\/aif-roadmap generate\n/);
+      expect(callArgs.prompt).toContain("ROADMAP.md");
     });
 
     it("should accept vision without DESCRIPTION.md", async () => {
@@ -275,6 +275,28 @@ describe("roadmapGeneration", () => {
       expect(result.tasks).toHaveLength(1);
     });
 
+    it("should extract JSON from fence even when agent adds extra text after", async () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap\n- [ ] Y");
+
+      mockRunApiRuntimeOneShot.mockResolvedValue({
+        result: {
+          outputText:
+            '```json\n{"alias":"v1","tasks":[{"title":"Y","description":"do Y","phase":1,"phaseName":"P1","sequence":1}]}\n```\n\nThe ROADMAP.md file currently only contains a summary. Please provide detailed milestones.',
+          usage: {
+            inputTokens: 50,
+            outputTokens: 30,
+            totalTokens: 80,
+            costUsd: 0.0005,
+          },
+        },
+        context: {},
+      });
+
+      const result = await generateRoadmapTasks({ projectId, roadmapAlias: "v1" });
+      expect(result.tasks).toHaveLength(1);
+      expect(result.tasks[0].title).toBe("Y");
+    });
+
     it("should throw PARSE_ERROR for invalid JSON", async () => {
       const { projectId } = createProjectWithRoadmap("# Roadmap\n- [ ] X");
 
@@ -361,6 +383,163 @@ describe("roadmapGeneration", () => {
 
       expect(result.byPhase[1]).toEqual({ created: 1, skipped: 0 });
       expect(result.byPhase[2]).toEqual({ created: 2, skipped: 0 });
+    });
+
+    // Regression: lee-to/aif-handoff#55 — roadmap import used to assign every
+    // task the shared default plan path `.ai-factory/PLAN.md` because
+    // importGeneratedTasks didn't compute a per-task planPath, so successive
+    // tasks would overwrite each other's plan file on disk. The fix derives a
+    // unique slug-based planPath per task while leaving plannerMode untouched.
+    it("should assign a unique per-task planPath on roadmap import (#55)", () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap");
+
+      const tasks = [
+        {
+          title: "Implement auth flow",
+          description: "JWT + refresh",
+          phase: 1,
+          phaseName: "Backend",
+          sequence: 1,
+        },
+        {
+          title: "Add product search",
+          description: "Postgres FTS",
+          phase: 1,
+          phaseName: "Backend",
+          sequence: 2,
+        },
+        {
+          title: "Build dashboard page",
+          description: "React + Tailwind",
+          phase: 2,
+          phaseName: "Frontend",
+          sequence: 1,
+        },
+      ];
+
+      const result = importGeneratedTasks(projectId, {
+        alias: "v1",
+        tasks,
+      });
+
+      expect(result.created, "all three tasks should be created").toBe(3);
+      expect(result.skipped).toBe(0);
+
+      const stored = findTasksByRoadmapAlias(projectId, "v1");
+      expect(stored).toHaveLength(3);
+
+      const planPaths = stored.map((t) => t.planPath);
+      const uniquePlanPaths = new Set(planPaths);
+      expect(uniquePlanPaths.size, "each imported task must have a distinct planPath").toBe(3);
+
+      for (const path of planPaths) {
+        expect(
+          path,
+          "no imported task should inherit the shared default `.ai-factory/PLAN.md`",
+        ).not.toBe(".ai-factory/PLAN.md");
+        expect(path.startsWith(".ai-factory/plans/")).toBe(true);
+        expect(path.endsWith(".md")).toBe(true);
+      }
+
+      // Each planPath must match the slug computed from the title via the
+      // shared helper — keeps the contract with `generatePlanPath` explicit.
+      for (const task of tasks) {
+        const expectedPath = generatePlanPath(task.title, "full", {
+          plansDir: ".ai-factory/plans/",
+          defaultPlanPath: ".ai-factory/PLAN.md",
+        });
+        const matched = stored.find((t) => t.title === task.title);
+        expect(matched, `task ${task.title} should exist`).toBeDefined();
+        expect(matched?.planPath).toBe(expectedPath);
+      }
+    });
+
+    // Regression: slug collisions between distinct titles must not produce
+    // duplicate planPaths. When two titles slugify to the same string (e.g.
+    // punctuation-only differences), the second task should get a `-2`
+    // suffix before `.md`, and so on.
+    it("should resolve slug collisions with numeric suffixes", () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap");
+
+      const tasks = [
+        {
+          title: "Fix bug!",
+          description: "first",
+          phase: 1,
+          phaseName: "Backend",
+          sequence: 1,
+        },
+        {
+          title: "Fix bug?",
+          description: "second",
+          phase: 1,
+          phaseName: "Backend",
+          sequence: 2,
+        },
+        {
+          title: "Fix bug.",
+          description: "third",
+          phase: 1,
+          phaseName: "Backend",
+          sequence: 3,
+        },
+      ];
+
+      const result = importGeneratedTasks(projectId, { alias: "v1", tasks });
+      expect(result.created).toBe(3);
+
+      const stored = findTasksByRoadmapAlias(projectId, "v1");
+      const planPaths = stored.map((t) => t.planPath).sort();
+
+      expect(new Set(planPaths).size, "collisions must be resolved to unique paths").toBe(3);
+      expect(planPaths).toEqual(
+        [
+          ".ai-factory/plans/fix-bug.md",
+          ".ai-factory/plans/fix-bug-2.md",
+          ".ai-factory/plans/fix-bug-3.md",
+        ].sort(),
+      );
+    });
+
+    // A second import against the same project should keep stepping the
+    // suffix forward instead of overwriting any existing plan file.
+    it("should avoid collisions across repeated imports", () => {
+      const { projectId } = createProjectWithRoadmap("# Roadmap");
+
+      importGeneratedTasks(projectId, {
+        alias: "v1",
+        tasks: [
+          {
+            title: "Fix bug",
+            description: "first pass",
+            phase: 1,
+            phaseName: "Backend",
+            sequence: 1,
+          },
+        ],
+      });
+
+      importGeneratedTasks(projectId, {
+        alias: "v2",
+        tasks: [
+          {
+            title: "Fix bug",
+            description: "second pass",
+            phase: 1,
+            phaseName: "Backend",
+            sequence: 1,
+          },
+        ],
+      });
+
+      const all = [
+        ...findTasksByRoadmapAlias(projectId, "v1"),
+        ...findTasksByRoadmapAlias(projectId, "v2"),
+      ];
+      const planPaths = all.map((t) => t.planPath).sort();
+      expect(planPaths).toEqual(
+        [".ai-factory/plans/fix-bug.md", ".ai-factory/plans/fix-bug-2.md"].sort(),
+      );
     });
   });
 });

@@ -202,7 +202,50 @@ All files must be created and modified inside this directory. Do NOT create file
 HANDOFF_TASK_ID: ${taskId}
 HANDOFF_SKIP_REVIEW: ${task.skipReview ? "1" : "0"}`;
 
-  const prompt = `${useSubagents ? "Implement the task using the provided plan." : implementSlashCommand}
+  const isRework = task.reworkRequested;
+
+  // Rework header is surfaced loudly so the model cannot miss that this is
+  // a reopened task with an explicit human/agent rework comment.
+  const reworkHeaderBlock = isRework
+    ? `================================================
+  REWORK REQUEST — THIS IS THE PRIMARY TASK
+================================================
+
+You are addressing a REWORK REQUEST on a previously-completed task. The rework comment below is your PRIMARY instruction — it supersedes the checklist state of the plan. The task was previously marked DONE, but the reviewer is NOT satisfied and has requested changes. Address EXACTLY the request below. Do not re-do previously completed work unless the request explicitly asks for it.
+
+<<<REWORK_COMMENT
+${formatReworkCommentForPrompt(latestReworkComment)}
+REWORK_COMMENT
+
+================================================
+`
+    : "";
+
+  const reworkProtocolBlock = isRework
+    ? `
+
+Rework handling protocol:
+1) FIRST, restate the rework request in your own words (1-2 sentences) so it's clear you understood it. Reference specific files, functions, or plan items mentioned in the request.
+2) Identify which files in the codebase and/or plan items need to change to satisfy the request.
+3) Make the minimal set of changes required. Do NOT refactor unrelated code.
+4) If the rework request cannot be satisfied (e.g. it asks for something impossible or contradicts an earlier decision), say so EXPLICITLY in the final result text — do not silently skip it or claim "already done".
+5) If the plan checklist shows all items completed, do not interpret that as "nothing to do" — the rework comment is the source of truth for this run.`
+    : "";
+
+  const reworkSystemAppend = isRework
+    ? "\n\nREWORK MODE: A previously-completed task has been reopened. The rework comment inside the prompt is the primary instruction. Do not treat a fully-checked plan as 'nothing to do'."
+    : "";
+
+  const effectiveSystemAppend = `${scopeConstraint}${reworkSystemAppend}`;
+
+  // For coordinator mode the rework header goes at the very top of the prompt
+  // so it cannot be buried below the lead line. For skill mode we keep the
+  // slash command on the first line so Claude Code still expands it, and
+  // surface the rework header inside the body instead.
+  const topReworkHeader = useSubagents ? reworkHeaderBlock : "";
+  const bodyReworkHeader = useSubagents ? "" : reworkHeaderBlock;
+
+  const prompt = `${topReworkHeader}${useSubagents ? "Implement the task using the provided plan." : implementSlashCommand}
 
 ${
   useSubagents
@@ -216,7 +259,7 @@ Do not perform Handoff MCP sync yourself.
 
 ${scopeConstraint}
 
-Title: ${task.title}
+${bodyReworkHeader}Title: ${task.title}
 Description: ${task.description}
 Task attachments:
 ${formatAttachmentsForPrompt(task.attachments)}
@@ -224,19 +267,13 @@ ${formatAttachmentsForPrompt(task.attachments)}
 Plan path:
 ${planSection}
 
-${
-  task.reworkRequested
-    ? `Rework mode: true (requested from done/request_changes).
-Latest rework comment (must be addressed in this implementation run):
-${formatReworkCommentForPrompt(latestReworkComment)}`
-    : "Rework mode: false."
-}
+${isRework ? "Rework mode: true (requested from done/request_changes)." : "Rework mode: false."}
 
 Execution rules:
 - Respect task dependencies and checklist state from the plan file.
 - Keep plan checklist state accurate while implementing.
 - Run tests/lint/verification relevant to the changes.
-- IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.`;
+- IMPORTANT: The plan file is ${effectivePlanPath}. Always read from and annotate this exact file — do not create plan files at other paths.${reworkProtocolBlock}`;
   const workflowSpec = createRuntimeWorkflowSpec({
     workflowKind: "implementer",
     prompt,
@@ -245,8 +282,11 @@ Execution rules:
     fallbackSlashCommand: implementSlashCommand,
     fallbackStrategy: useSubagents ? "slash_command" : "none",
     executionMode: useSubagents ? "native_subagents" : "standard",
-    sessionReusePolicy: "resume_if_available",
-    systemPromptAppend: scopeConstraint,
+    // Rework must always start a fresh session — resuming an old thread
+    // leads Claude to treat the completed work as authoritative and ignore
+    // the new rework request.
+    sessionReusePolicy: isRework ? "never" : "resume_if_available",
+    systemPromptAppend: effectiveSystemAppend,
     metadata: {
       reworkRequested: task.reworkRequested,
       skipReview: task.skipReview ?? false,

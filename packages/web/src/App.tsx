@@ -213,8 +213,10 @@ function AppContent() {
       {project && (
         <>
           <ChatPanel
+            key={project.id}
             isOpen={chatOpen}
             projectId={project.id}
+            projectName={project.name}
             taskId={selectedTaskId}
             onClose={() => setChatOpen(false)}
             onOpenTask={(id) => {

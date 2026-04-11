@@ -1,6 +1,14 @@
 import { RuntimeExecutionError, type RuntimeErrorCategory } from "../../errors.js";
 
-const USAGE_LIMIT_PATTERNS = ["usage limit", "out of extra usage", "rate limit", "quota"];
+const USAGE_LIMIT_PATTERNS = [
+  "usage limit",
+  "out of extra usage",
+  "rate limit",
+  "quota",
+  "hit your limit",
+  "limit reached",
+  "limit exceeded",
+];
 const PERMISSION_PATTERNS = ["permission denied", "write permission", "blocked by permissions"];
 const AUTH_PATTERNS = [
   "authentication_error",

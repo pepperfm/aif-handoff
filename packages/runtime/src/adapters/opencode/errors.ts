@@ -9,7 +9,17 @@ const AUTH_PATTERNS = [
   "401",
   "403",
 ];
-const RATE_LIMIT_PATTERNS = ["rate limit", "rate_limit", "too many requests", "429", "quota"];
+const RATE_LIMIT_PATTERNS = [
+  "rate limit",
+  "rate_limit",
+  "too many requests",
+  "429",
+  "quota",
+  "hit your limit",
+  "limit reached",
+  "limit exceeded",
+  "out of credits",
+];
 const TIMEOUT_PATTERNS = ["timed out", "timeout", "etimedout", "aborted"];
 const NETWORK_PATTERNS = ["network", "fetch failed", "econnrefused", "connection refused"];
 const SESSION_PATTERNS = ["session", "not found", "404"];

@@ -14,6 +14,17 @@ describe("OpenCode error classification", () => {
     expect(error.category).toBe("rate_limit");
   });
 
+  it.each([
+    "You've hit your limit · resets 5pm",
+    "Limit reached for this account",
+    "Limit exceeded",
+    "Out of credits",
+  ])("classifies provider limit phrasings as rate limit: %s", (msg) => {
+    const error = classifyOpenCodeRuntimeError(new Error(msg));
+    expect(error.adapterCode).toBe("OPENCODE_RATE_LIMIT");
+    expect(error.category).toBe("rate_limit");
+  });
+
   it("classifies timeout errors", () => {
     const error = classifyOpenCodeRuntimeError(new Error("request timeout"));
     expect(error.adapterCode).toBe("OPENCODE_TIMEOUT");

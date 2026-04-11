@@ -357,6 +357,7 @@ export const api = {
   sendChatMessage(input: ChatRequest): Promise<{
     conversationId: string;
     sessionId: string | null;
+    assistantMessage?: string | null;
     attachments?: ChatMessageAttachment[];
   }> {
     console.debug("[api] POST /chat", {
@@ -367,6 +368,7 @@ export const api = {
     return request<{
       conversationId: string;
       sessionId: string | null;
+      assistantMessage?: string | null;
       attachments?: ChatMessageAttachment[];
     }>(
       "/chat",
