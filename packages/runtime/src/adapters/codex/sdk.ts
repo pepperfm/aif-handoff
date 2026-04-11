@@ -228,6 +228,20 @@ function buildThreadOptions(input: RuntimeRunInput): ThreadOptions {
     threadOpts.sandboxMode = sandboxMode;
   }
 
+  // bypassPermissions: full parity with Claude's --dangerously-skip-permissions.
+  // Codex has two orthogonal safety axes (approval + sandbox); bypass clears both,
+  // mirroring Claude where "skip permissions" = "agent can do anything". Explicit
+  // profile-level overrides from options.approvalPolicy / options.sandboxMode above
+  // still win — a user can consciously opt into a narrower policy.
+  if (execution?.bypassPermissions) {
+    if (threadOpts.approvalPolicy == null) {
+      threadOpts.approvalPolicy = "never";
+    }
+    if (threadOpts.sandboxMode == null) {
+      threadOpts.sandboxMode = "danger-full-access";
+    }
+  }
+
   const networkAccessEnabled =
     typeof options.networkAccessEnabled === "boolean"
       ? options.networkAccessEnabled

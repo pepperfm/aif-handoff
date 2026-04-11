@@ -166,6 +166,70 @@ describe("codex cli transport", () => {
     expect(result.events?.[0]?.type).toBe("stream:text");
   });
 
+  it("appends --dangerously-bypass-approvals-and-sandbox when execution.bypassPermissions is true", async () => {
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValueOnce(child);
+
+    const runPromise = runCodexCli(createRunInput({ execution: { bypassPermissions: true } }));
+
+    const { cliArgs: args } = getSpawnInvocation();
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+
+    child.stdout.emit("data", "ok");
+    child.emit("close", 0);
+    await runPromise;
+  });
+
+  it("does not add bypass flag when execution.bypassPermissions is false or absent", async () => {
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValueOnce(child);
+
+    const runPromise = runCodexCli(createRunInput());
+
+    const { cliArgs: args } = getSpawnInvocation();
+    expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+
+    child.stdout.emit("data", "ok");
+    child.emit("close", 0);
+    await runPromise;
+  });
+
+  it("does not inject bypass flag into custom codexCliArgs templates", async () => {
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValueOnce(child);
+
+    const runPromise = runCodexCli(
+      createRunInput({
+        execution: { bypassPermissions: true },
+        options: {
+          codexCliArgs: ["run", "--json", "--prompt={prompt}"],
+        },
+      }),
+    );
+
+    const { cliArgs: args } = getSpawnInvocation();
+    expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(args).toEqual(["run", "--json", "--prompt=Implement feature"]);
+
+    child.stdout.emit("data", "ok");
+    child.emit("close", 0);
+    await runPromise;
+  });
+
+  it("appends --skip-git-repo-check when options.skipGitRepoCheck is true", async () => {
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValueOnce(child);
+
+    const runPromise = runCodexCli(createRunInput({ options: { skipGitRepoCheck: true } }));
+
+    const { cliArgs: args } = getSpawnInvocation();
+    expect(args).toContain("--skip-git-repo-check");
+
+    child.stdout.emit("data", "ok");
+    child.emit("close", 0);
+    await runPromise;
+  });
+
   it("throws classified error when CLI exits with non-zero code", async () => {
     const child = createMockChildProcess();
     spawnMock.mockReturnValueOnce(child);

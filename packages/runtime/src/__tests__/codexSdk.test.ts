@@ -242,6 +242,77 @@ describe("runCodexSdk", () => {
     );
   });
 
+  it("sets approvalPolicy=never and sandboxMode=danger-full-access when bypassPermissions is true", async () => {
+    mockRunStreamed.mockResolvedValue({
+      events: createMockEvents([
+        { type: "thread.started", thread_id: "thread-bypass" },
+        {
+          type: "turn.completed",
+          usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 },
+        },
+      ]),
+    });
+
+    await runCodexSdk(
+      createRunInput({
+        execution: { bypassPermissions: true },
+      }),
+    );
+
+    expect(mockStartThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPolicy: "never",
+        sandboxMode: "danger-full-access",
+      }),
+    );
+  });
+
+  it("does not override explicit profile options.sandboxMode when bypassPermissions is true", async () => {
+    mockRunStreamed.mockResolvedValue({
+      events: createMockEvents([
+        { type: "thread.started", thread_id: "thread-bypass-override" },
+        {
+          type: "turn.completed",
+          usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 },
+        },
+      ]),
+    });
+
+    await runCodexSdk(
+      createRunInput({
+        options: { sandboxMode: "workspace-write", approvalPolicy: "on-request" },
+        execution: { bypassPermissions: true },
+      }),
+    );
+
+    expect(mockStartThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPolicy: "on-request",
+        sandboxMode: "workspace-write",
+      }),
+    );
+  });
+
+  it("does not set approval or sandbox when bypassPermissions is absent", async () => {
+    mockRunStreamed.mockResolvedValue({
+      events: createMockEvents([
+        { type: "thread.started", thread_id: "thread-no-bypass" },
+        {
+          type: "turn.completed",
+          usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 },
+        },
+      ]),
+    });
+
+    await runCodexSdk(createRunInput());
+
+    const threadOpts = mockStartThread.mock.calls[0]?.[0] as
+      | { approvalPolicy?: unknown; sandboxMode?: unknown }
+      | undefined;
+    expect(threadOpts?.approvalPolicy).toBeUndefined();
+    expect(threadOpts?.sandboxMode).toBeUndefined();
+  });
+
   it("passes outputSchema to turn options", async () => {
     const schema = { type: "object", properties: { summary: { type: "string" } } };
     mockRunStreamed.mockResolvedValue({

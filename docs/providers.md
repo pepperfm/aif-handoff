@@ -145,7 +145,9 @@ SDK-specific options:
 - `codexCliPath` — path to the `codex` binary (SDK wraps the CLI)
 - `codexConfig` — JSON object of CLI config overrides (flattened to `--config` flags)
 - `sandboxMode` — one of `read-only`, `workspace-write`, `danger-full-access`
+- `approvalPolicy` — one of `untrusted`, `on-failure`, `on-request`, `never`
 - `modelReasoningEffort` — one of `minimal`, `low`, `medium`, `high`, `xhigh`
+- `skipGitRepoCheck` — bypass the Codex guard that refuses to run outside a git repo (both SDK and CLI)
 
 ### Codex (CLI transport)
 
@@ -179,6 +181,36 @@ SDK-specific options:
   "enabled": true
 }
 ```
+
+### Bypass semantics (AGENT_BYPASS_PERMISSIONS)
+
+When `AGENT_BYPASS_PERMISSIONS=1` is set in the environment, the runtime layer flips `execution.bypassPermissions=true`. This is intended for trusted, externally sandboxed environments (Docker containers) where the agent should run unattended.
+
+Each adapter translates this to its native "trust me, just run" mechanism:
+
+| Runtime / transport | Bypass translation                                                            |
+| ------------------- | ----------------------------------------------------------------------------- |
+| Claude SDK          | `permissionMode="bypassPermissions"` + `allowDangerouslySkipPermissions=true` |
+| Claude CLI          | `--dangerously-skip-permissions`                                              |
+| Codex SDK           | `approvalPolicy="never"` + `sandboxMode="danger-full-access"`                 |
+| Codex CLI           | `--dangerously-bypass-approvals-and-sandbox`                                  |
+
+Why Codex disables both approval prompts **and** the sandbox: Codex has two orthogonal safety rails (approval policy + OS-level sandbox), while Claude has only one (permission prompts). To match Claude's effective "agent can do anything" behavior, both rails must be cleared. Leaving the Codex sandbox at its default `workspace-write` blocks network access — so `npm install`, `curl`, `git push`, and WebFetch would silently fail.
+
+**Opting out for Codex:** if you want narrower safety even in bypass mode, set `options.sandboxMode` or `options.approvalPolicy` explicitly in your profile — explicit profile values override the bypass defaults:
+
+```json
+{
+  "runtimeId": "codex",
+  "transport": "sdk",
+  "options": {
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never"
+  }
+}
+```
+
+The `--dangerously-bypass-approvals-and-sandbox` CLI flag is a single-flag alias that clears both axes atomically — there is no per-axis opt-out for the CLI transport in bypass mode short of setting `AGENT_BYPASS_PERMISSIONS=0` and relying on profile options.
 
 ### OpenRouter (API)
 

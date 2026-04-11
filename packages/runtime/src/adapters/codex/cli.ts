@@ -76,6 +76,20 @@ function normalizeCliArgs(input: RuntimeRunInput): string[] {
   if (effort) {
     args.push("-c", `model_reasoning_effort="${effort}"`);
   }
+
+  // Skip git repo check — opt-in via profile for non-git working directories
+  if (options.skipGitRepoCheck === true) {
+    args.push("--skip-git-repo-check");
+  }
+
+  // bypassPermissions: parity with Claude's --dangerously-skip-permissions.
+  // Codex's single flag clears both approval prompts and the sandbox, which
+  // matches the "agent can do anything" contract. Intended for externally
+  // sandboxed environments (Docker containers).
+  if (input.execution?.bypassPermissions) {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  }
+
   return args;
 }
 
