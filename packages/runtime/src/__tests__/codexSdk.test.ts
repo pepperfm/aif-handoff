@@ -212,7 +212,7 @@ describe("runCodexSdk", () => {
     expect(mockStartThread).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.4" }));
   });
 
-  it("passes approval policy and sandbox mode to thread options", async () => {
+  it("passes approval policy and sandbox mode from hooks to thread options (overriding non-bypass defaults)", async () => {
     mockRunStreamed.mockResolvedValue({
       events: createMockEvents([
         { type: "thread.started", thread_id: "thread-approval" },
@@ -227,8 +227,8 @@ describe("runCodexSdk", () => {
       createRunInput({
         execution: {
           hooks: {
-            approvalPolicy: "on-request",
-            sandboxMode: "workspace-write",
+            approvalPolicy: "on-failure",
+            sandboxMode: "read-only",
           },
         },
       }),
@@ -236,8 +236,8 @@ describe("runCodexSdk", () => {
 
     expect(mockStartThread).toHaveBeenCalledWith(
       expect.objectContaining({
-        approvalPolicy: "on-request",
-        sandboxMode: "workspace-write",
+        approvalPolicy: "on-failure",
+        sandboxMode: "read-only",
       }),
     );
   });
@@ -293,7 +293,7 @@ describe("runCodexSdk", () => {
     );
   });
 
-  it("does not set approval or sandbox when bypassPermissions is absent", async () => {
+  it("applies stable non-bypass defaults (on-request + workspace-write) when bypassPermissions is absent", async () => {
     mockRunStreamed.mockResolvedValue({
       events: createMockEvents([
         { type: "thread.started", thread_id: "thread-no-bypass" },
@@ -306,11 +306,37 @@ describe("runCodexSdk", () => {
 
     await runCodexSdk(createRunInput());
 
-    const threadOpts = mockStartThread.mock.calls[0]?.[0] as
-      | { approvalPolicy?: unknown; sandboxMode?: unknown }
-      | undefined;
-    expect(threadOpts?.approvalPolicy).toBeUndefined();
-    expect(threadOpts?.sandboxMode).toBeUndefined();
+    expect(mockStartThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPolicy: "on-request",
+        sandboxMode: "workspace-write",
+      }),
+    );
+  });
+
+  it("explicit profile options win over non-bypass defaults", async () => {
+    mockRunStreamed.mockResolvedValue({
+      events: createMockEvents([
+        { type: "thread.started", thread_id: "thread-explicit-non-bypass" },
+        {
+          type: "turn.completed",
+          usage: { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 },
+        },
+      ]),
+    });
+
+    await runCodexSdk(
+      createRunInput({
+        options: { approvalPolicy: "on-failure", sandboxMode: "read-only" },
+      }),
+    );
+
+    expect(mockStartThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalPolicy: "on-failure",
+        sandboxMode: "read-only",
+      }),
+    );
   });
 
   it("passes outputSchema to turn options", async () => {

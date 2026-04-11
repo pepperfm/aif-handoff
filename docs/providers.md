@@ -167,6 +167,8 @@ SDK-specific options:
 }
 ```
 
+**`codexCliArgs` is a full escape hatch.** When `options.codexCliArgs` is set, the adapter uses the custom template verbatim (with `{prompt}`, `{model}`, `{session_id}` substitutions) and **skips all adapter-managed flags** — including `--model`, `-c model_reasoning_effort`, `-c approval_policy`, `-c sandbox_mode`, `--skip-git-repo-check`, and the bypass-permission translation. If you use a custom template you are responsible for emitting these flags yourself. Profile-level `options.approvalPolicy`, `options.sandboxMode`, `options.skipGitRepoCheck`, `options.modelReasoningEffort`, and `AGENT_BYPASS_PERMISSIONS` all have **no effect** when a custom template is active. Use this only for integration with non-standard CLI wrappers.
+
 ### Codex (API transport)
 
 ```json

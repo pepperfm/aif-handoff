@@ -78,17 +78,26 @@ function normalizeCodexSandboxMode(value: unknown): CodexSandboxMode | null {
 /**
  * Resolve the effective approval policy and sandbox mode for a Codex CLI run.
  *
- * Explicit profile options (`options.approvalPolicy` / `options.sandboxMode`)
- * always win. If neither is set and `execution.bypassPermissions` is true, both
- * default to the full-bypass pair (`never` + `danger-full-access`) — matching
- * the effective behaviour of the single atomic flag
- * `--dangerously-bypass-approvals-and-sandbox`, but routed through `-c`
- * overrides so the same logic works uniformly on both `codex exec` and
- * `codex exec resume` (`--sandbox` is rejected by the resume subcommand).
+ * Three-layer precedence:
+ *   1. explicit profile options (`options.approvalPolicy` / `options.sandboxMode`)
+ *   2. bypass defaults (when `execution.bypassPermissions=true`)
+ *   3. stable non-bypass defaults (`on-request` + `workspace-write`)
+ *
+ * The non-bypass defaults keep behaviour consistent across hosts regardless
+ * of the user's ~/.codex/config.toml — prior to the bypass-permissions
+ * refactor these defaults were set by a Codex-specific hook factory in the
+ * API layer; the logic now lives inside the adapter so api/agent/runtime all
+ * share the same contract.
+ *
+ * Values are always non-null — the caller always emits the corresponding
+ * `-c approval_policy="..."` / `-c sandbox_mode="..."` override. Routing
+ * through `-c` rather than `--sandbox` / the atomic
+ * `--dangerously-bypass-approvals-and-sandbox` flag is required because the
+ * `codex exec resume` subcommand rejects `--sandbox` outright.
  */
 function resolveCodexPermissionOverrides(input: RuntimeRunInput): {
-  approvalPolicy: CodexApprovalPolicy | null;
-  sandboxMode: CodexSandboxMode | null;
+  approvalPolicy: CodexApprovalPolicy;
+  sandboxMode: CodexSandboxMode;
 } {
   const options = asRecord(input.options);
   const explicitApproval = normalizeCodexApprovalPolicy(options.approvalPolicy);
@@ -96,8 +105,8 @@ function resolveCodexPermissionOverrides(input: RuntimeRunInput): {
   const bypass = input.execution?.bypassPermissions === true;
 
   return {
-    approvalPolicy: explicitApproval ?? (bypass ? "never" : null),
-    sandboxMode: explicitSandbox ?? (bypass ? "danger-full-access" : null),
+    approvalPolicy: explicitApproval ?? (bypass ? "never" : "on-request"),
+    sandboxMode: explicitSandbox ?? (bypass ? "danger-full-access" : "workspace-write"),
   };
 }
 
@@ -141,22 +150,20 @@ function normalizeCliArgs(input: RuntimeRunInput): string[] {
     args.push("--skip-git-repo-check");
   }
 
-  // Approval policy and sandbox mode. Both routed via `-c` config overrides
-  // (instead of --sandbox / --dangerously-bypass-approvals-and-sandbox) so the
-  // same logic works on `codex exec` AND `codex exec resume` — the resume
-  // subcommand rejects the --sandbox flag outright.
+  // Approval policy and sandbox mode. Always emitted so behaviour stays
+  // stable across hosts regardless of the user's ~/.codex/config.toml.
   //
-  // bypassPermissions=true defaults to ("never", "danger-full-access"),
-  // matching Claude's --dangerously-skip-permissions (no approval prompts,
-  // no OS sandbox). Explicit profile options always win — so a user can opt
-  // into a narrower policy even while AGENT_BYPASS_PERMISSIONS=1 is set.
+  //   bypass=false, no profile override → "on-request" + "workspace-write"
+  //   bypass=true,  no profile override → "never"      + "danger-full-access"
+  //   explicit `options.approvalPolicy` / `options.sandboxMode` always win
+  //
+  // Routed via `-c` rather than `--sandbox` or the atomic
+  // `--dangerously-bypass-approvals-and-sandbox` flag — `codex exec resume`
+  // rejects `--sandbox`, and `-c` overrides work uniformly across both the
+  // fresh exec and resume paths.
   const { approvalPolicy, sandboxMode } = resolveCodexPermissionOverrides(input);
-  if (approvalPolicy) {
-    args.push("-c", `approval_policy="${approvalPolicy}"`);
-  }
-  if (sandboxMode) {
-    args.push("-c", `sandbox_mode="${sandboxMode}"`);
-  }
+  args.push("-c", `approval_policy="${approvalPolicy}"`);
+  args.push("-c", `sandbox_mode="${sandboxMode}"`);
 
   return args;
 }
